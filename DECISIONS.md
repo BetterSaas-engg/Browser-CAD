@@ -77,3 +77,11 @@ Format: what we decided, why, what we rejected, and how reversible it is.
 - **Why a signed check:** Facet corners sit on the true surface, so the hole the mesh describes is a polygon inscribed in the real circle. That removes slightly less material than the exact cylinder, so the error has a known direction, not just a known size. Checking the direction catches a class of mistakes a magnitude check would not.
 - **Why 1 mm³:** 0.009% of the part. Roughly twelve times the deviation this tolerance actually produces, so it will not break when replicad adjusts its tessellator, and far below the 785 mm³ a missing hole would cost or the 1000x of a metre/millimetre mix-up.
 - **Also checks:** that the mesh is watertight and consistently wound (otherwise the sum is meaningless), the bounding box is 40 x 30 x 10, and the underside sits on z = 0.
+
+## D16 — AI-assisted design via generated replicad code (2026-10-03)
+- **Status:** Planned, not started.
+- **What:** The user describes a part in plain language, an LLM writes replicad code, our worker runs it, and the user sees, tweaks and exports the result.
+- **Why:** Our kernel is code-driven, which is what LLMs are good at. The output is exact, editable, parametric geometry — not the uneditable mesh most AI 3D generators hand back.
+- **Order:** Comes after the parameters bite, so the AI has named parameters to target.
+- **Guardrails:** Generated code runs only in the worker. The checks we already have — volume and bounding box — catch obvious errors before anything is exported.
+- **Rejected for now:** AI in slicing or printer control, since Bambu Studio covers both. Also AI for printability checks: deterministic geometry rules are more reliable for deciding, though AI may later explain what those rules found.
