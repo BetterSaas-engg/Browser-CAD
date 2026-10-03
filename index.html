@@ -3,38 +3,97 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>browser-cad — kernel check</title>
+    <title>browser-cad</title>
     <style>
+      html,
       body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        display: flex;
+        flex-direction: column;
         font-family: system-ui, sans-serif;
-        margin: 3rem auto;
-        max-width: 40rem;
-        padding: 0 1rem;
         line-height: 1.5;
+        background: #1e2228;
+        color: #e6e8ea;
+      }
+      header {
+        flex: none;
+        display: flex;
+        align-items: baseline;
+        gap: 1rem;
+        flex-wrap: wrap;
+        padding: 0.75rem 1.25rem;
+        border-bottom: 1px solid #333a42;
+      }
+      h1 {
+        font-size: 1rem;
+        font-weight: 700;
+        margin: 0;
+        letter-spacing: 0.02em;
+      }
+      .part {
+        font-size: 0.8125rem;
+        color: #9aa3ad;
+        margin: 0;
       }
       #status {
-        font-size: 1.25rem;
+        margin: 0;
+        margin-left: auto;
+        font-variant-numeric: tabular-nums;
         font-weight: 600;
       }
+      #status[data-state="done"] {
+        color: #7fd1a0;
+      }
       #status[data-state="error"] {
-        color: #b00020;
+        color: #ff8a8a;
+      }
+      /* The canvas sizes itself to this element, so it must have a real height
+         of its own rather than being driven by its content. */
+      #viewport {
+        flex: 1 1 auto;
+        min-height: 0;
+        position: relative;
+      }
+      #viewport canvas {
+        display: block;
       }
       #error {
+        flex: none;
+        margin: 0;
         white-space: pre-wrap;
-        color: #b00020;
-        background: #fdf0f2;
-        border-left: 3px solid #b00020;
-        padding: 0.75rem 1rem;
+        color: #ffd4d4;
+        background: #3a1d20;
+        border-top: 2px solid #ff8a8a;
+        padding: 0.75rem 1.25rem;
         font-family: ui-monospace, monospace;
-        font-size: 0.875rem;
+        font-size: 0.8125rem;
+        max-height: 30vh;
+        overflow: auto;
+      }
+      .hint {
+        flex: none;
+        margin: 0;
+        padding: 0.5rem 1.25rem;
+        font-size: 0.75rem;
+        color: #7d8793;
+        border-top: 1px solid #333a42;
       }
     </style>
   </head>
   <body>
-    <h1>browser-cad</h1>
-    <p>Bite 1a: does the geometry kernel run in the browser?</p>
-    <p>Part: 40 &times; 30 &times; 10 mm plate, 10 mm hole through the centre.</p>
-    <p id="status">Starting…</p>
+    <header>
+      <h1>browser-cad</h1>
+      <p class="part">40 &times; 30 &times; 10 mm plate, 10 mm hole through the centre</p>
+      <p id="status">Starting…</p>
+    </header>
+    <div id="viewport"></div>
+    <p class="hint">
+      Drag to orbit &middot; scroll to zoom &middot; right-drag to pan &middot; grid
+      squares are 10 mm &middot; X red, Y green, Z blue
+    </p>
     <pre id="error" hidden></pre>
     <script type="module" src="/src/main.ts"></script>
   </body>

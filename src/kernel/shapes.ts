@@ -5,6 +5,7 @@
  */
 import { drawCircle, drawRectangle, isShape3D, measureVolume } from "replicad";
 import type { Shape3D } from "replicad";
+import type { PartMesh } from "../mesh";
 
 /** Nominal dimensions of the bite-1 tracer-bullet part, in millimetres. */
 export const BOX_WITH_HOLE = {
@@ -48,7 +49,39 @@ export function expectedVolumeMm3(): number {
   return plate - hole;
 }
 
-/** The part's volume as measured by the kernel, in mm³. */
-export function measureBoxWithHoleVolumeMm3(): number {
-  return measureVolume(makeBoxWithHole());
+/**
+ * How finely to tessellate for display, in millimetres and radians. The hole's
+ * 5 mm radius is the tightest curve on the part, so these are set fine enough
+ * that it reads as round rather than faceted. Display only — the kernel keeps
+ * the exact geometry, so nothing downstream inherits this approximation.
+ */
+const MESH_OPTIONS = { tolerance: 0.01, angularTolerance: 0.1 } as const;
+
+/** Tessellate a solid into the plain mesh format the viewport consumes. */
+function toPartMesh(shape: Shape3D): PartMesh {
+  const { vertices, triangles, normals } = shape.mesh(MESH_OPTIONS);
+  const { lines } = shape.meshEdges(MESH_OPTIONS);
+  return {
+    vertices: new Float32Array(vertices),
+    triangles: new Uint32Array(triangles),
+    normals: new Float32Array(normals),
+    edges: new Float32Array(lines),
+  };
+}
+
+/** Everything the page needs from the part. */
+export interface PartData {
+  volumeMm3: number;
+  mesh: PartMesh;
+}
+
+/**
+ * Build the part and derive both its volume and its display mesh.
+ *
+ * One function rather than two so the solid is only constructed once — it is
+ * by far the expensive step.
+ */
+export function buildBoxWithHole(): PartData {
+  const shape = makeBoxWithHole();
+  return { volumeMm3: measureVolume(shape), mesh: toPartMesh(shape) };
 }

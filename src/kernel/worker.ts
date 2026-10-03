@@ -6,13 +6,15 @@
 import { setOC } from "replicad";
 import initOpenCascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
-import { measureBoxWithHoleVolumeMm3 } from "./shapes";
+import { buildBoxWithHole } from "./shapes";
+import { meshBuffers } from "../mesh";
+import type { PartMesh } from "../mesh";
 
 export type WorkerRequest = { type: "build" };
 
 export type WorkerResponse =
   | { type: "ready" }
-  | { type: "result"; volumeMm3: number }
+  | { type: "result"; volumeMm3: number; mesh: PartMesh }
   | { type: "error"; message: string; stack?: string };
 
 /**
@@ -21,7 +23,7 @@ export type WorkerResponse =
  * with DOM.
  */
 const ctx = self as unknown as {
-  postMessage(message: WorkerResponse): void;
+  postMessage(message: WorkerResponse, transfer?: ArrayBuffer[]): void;
   onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
 };
 
@@ -58,7 +60,10 @@ ctx.onmessage = async (event) => {
       throw new Error(`Unknown request ${JSON.stringify(event.data)}`);
     }
     await kernelReady;
-    ctx.postMessage({ type: "result", volumeMm3: measureBoxWithHoleVolumeMm3() });
+    const { volumeMm3, mesh } = buildBoxWithHole();
+    // Hand the mesh buffers over rather than cloning them; the worker has no
+    // further use for them.
+    ctx.postMessage({ type: "result", volumeMm3, mesh }, meshBuffers(mesh));
   } catch (error) {
     fail("Geometry failed", error);
   }

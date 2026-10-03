@@ -47,3 +47,19 @@ Format: what we decided, why, what we rejected, and how reversible it is.
 - **What:** Added `"strict": true` to the tsconfig that `create-vite` generated, which omits it.
 - **Why:** D4 chose TypeScript to catch mistakes before runtime; without `strict`, null and `any` slip through and most of that value is lost.
 - **Reversibility:** High, but gets more expensive the more code is written against it.
+
+## D11 — Kernel and viewport meet at a plain mesh (2026-10-03)
+- **What:** `PartMesh` in `src/mesh.ts` — four typed arrays (vertices, triangles, normals, edges) and nothing else. The kernel produces it; the viewport draws it. Neither imports the other.
+- **Why:** Keeps D2's "swap the kernel later" option open, and lets the mesh buffers be transferred across the worker boundary instead of copied. It is also the only thing three.js actually needs.
+- **Note:** Edges come from the kernel's own curve tessellation (`meshEdges`), not from three.js rediscovering them from the triangles, so a circular hole stays circular.
+- **Reversibility:** High while the format stays this small.
+
+## D12 — Viewport is Z up, matching the kernel (2026-10-03)
+- **What:** The camera's up vector is Z and the grid is rotated into XY. three.js defaults to Y up.
+- **Why:** The alternative is rotating the part on load, which would make every coordinate on screen disagree with the coordinates the kernel and any future STL export use.
+- **Reversibility:** High now, low later — sketch planes and export orientation will both assume it.
+
+## D13 — Camera clip planes are fitted to the part (2026-10-03)
+- **What:** `near` and `far` are recomputed from the part's bounding sphere each time one is framed, rather than left at a fixed 0.1 to 10000.
+- **Why:** The depth buffer's precision is spread across the near-to-far range. A 100,000:1 span leaves very little of it where the part actually is, which is how coplanar surfaces and overlaid lines start to flicker.
+- **Watch:** `near` is the closest you can zoom. It is tied to part size, so a very small part keeps a correspondingly small `near`.

@@ -3,6 +3,7 @@
  * knows nothing about geometry.
  */
 import type { WorkerRequest, WorkerResponse } from "./kernel/worker";
+import { createViewport } from "./viewport/viewport";
 
 function requireElement(selector: string): HTMLElement {
   const element = document.querySelector<HTMLElement>(selector);
@@ -12,6 +13,7 @@ function requireElement(selector: string): HTMLElement {
 
 const statusEl = requireElement("#status");
 const errorEl = requireElement("#error");
+const viewportEl = requireElement("#viewport");
 
 /** Surface failures on the page as well as in the console — never swallow. */
 function showError(context: string, error: unknown): void {
@@ -23,6 +25,16 @@ function showError(context: string, error: unknown): void {
 }
 
 statusEl.textContent = "Loading kernel...";
+
+// Built before the kernel is requested, so a machine without WebGL says so
+// immediately instead of after a 23 MB download.
+let viewport;
+try {
+  viewport = createViewport(viewportEl);
+} catch (error) {
+  showError("Could not start the 3D viewport", error);
+  throw error;
+}
 
 const worker = new Worker(new URL("./kernel/worker.ts", import.meta.url), {
   type: "module",
@@ -43,6 +55,12 @@ worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       worker.postMessage({ type: "build" } satisfies WorkerRequest);
       break;
     case "result":
+      try {
+        viewport.showPart(message.mesh);
+      } catch (error) {
+        showError("Could not render the part", error);
+        break;
+      }
       statusEl.textContent = `Volume: ${message.volumeMm3.toFixed(3)} mm³`;
       statusEl.dataset.state = "done";
       break;
