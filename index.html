@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>browser-cad — kernel check</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        margin: 3rem auto;
+        max-width: 40rem;
+        padding: 0 1rem;
+        line-height: 1.5;
+      }
+      #status {
+        font-size: 1.25rem;
+        font-weight: 600;
+      }
+      #status[data-state="error"] {
+        color: #b00020;
+      }
+      #error {
+        white-space: pre-wrap;
+        color: #b00020;
+        background: #fdf0f2;
+        border-left: 3px solid #b00020;
+        padding: 0.75rem 1rem;
+        font-family: ui-monospace, monospace;
+        font-size: 0.875rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>browser-cad</h1>
+    <p>Bite 1a: does the geometry kernel run in the browser?</p>
+    <p>Part: 40 &times; 30 &times; 10 mm plate, 10 mm hole through the centre.</p>
+    <p id="status">Starting…</p>
+    <pre id="error" hidden></pre>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
