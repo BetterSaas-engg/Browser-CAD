@@ -7,14 +7,16 @@ import { setOC } from "replicad";
 import initOpenCascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { buildBoxWithHole } from "./shapes";
+import { boxWithHoleStl, STL_FILENAME } from "./stl";
 import { meshBuffers } from "../mesh";
 import type { PartMesh } from "../mesh";
 
-export type WorkerRequest = { type: "build" };
+export type WorkerRequest = { type: "build" } | { type: "exportStl" };
 
 export type WorkerResponse =
   | { type: "ready" }
   | { type: "result"; volumeMm3: number; mesh: PartMesh }
+  | { type: "stl"; filename: string; bytes: ArrayBuffer }
   | { type: "error"; message: string; stack?: string };
 
 /**
@@ -55,16 +57,26 @@ kernelReady.then(
 );
 
 ctx.onmessage = async (event) => {
+  const request = event.data;
   try {
-    if (event.data?.type !== "build") {
-      throw new Error(`Unknown request ${JSON.stringify(event.data)}`);
-    }
     await kernelReady;
-    const { volumeMm3, mesh } = buildBoxWithHole();
-    // Hand the mesh buffers over rather than cloning them; the worker has no
-    // further use for them.
-    ctx.postMessage({ type: "result", volumeMm3, mesh }, meshBuffers(mesh));
+    switch (request?.type) {
+      case "build": {
+        const { volumeMm3, mesh } = buildBoxWithHole();
+        // Hand the mesh buffers over rather than cloning them; the worker has
+        // no further use for them.
+        ctx.postMessage({ type: "result", volumeMm3, mesh }, meshBuffers(mesh));
+        break;
+      }
+      case "exportStl": {
+        const bytes = await boxWithHoleStl();
+        ctx.postMessage({ type: "stl", filename: STL_FILENAME, bytes }, [bytes]);
+        break;
+      }
+      default:
+        throw new Error(`Unknown request ${JSON.stringify(request)}`);
+    }
   } catch (error) {
-    fail("Geometry failed", error);
+    fail(request?.type === "exportStl" ? "STL export failed" : "Geometry failed", error);
   }
 };

@@ -63,3 +63,17 @@ Format: what we decided, why, what we rejected, and how reversible it is.
 - **What:** `near` and `far` are recomputed from the part's bounding sphere each time one is framed, rather than left at a fixed 0.1 to 10000.
 - **Why:** The depth buffer's precision is spread across the near-to-far range. A 100,000:1 span leaves very little of it where the part actually is, which is how coplanar surfaces and overlaid lines start to flicker.
 - **Watch:** `near` is the closest you can zoom. It is tied to part size, so a very small part keeps a correspondingly small `near`.
+
+## D14 — STL export tolerance: 0.001 mm / 0.05 rad, binary (2026-10-03)
+- **What:** `STL_EXPORT_OPTIONS` in `src/kernel/stl.ts`. Ten times finer than the 0.01 mm / 0.1 rad used for the viewport, and generated from the exact kernel solid rather than from the display mesh.
+- **Why:** The display mesh only has to look round; these bytes are the part. At 0.001 mm the facets of the 5 mm hole sit about 1 µm inside the true cylinder, two orders of magnitude below what an A1 resolves through a 0.4 mm nozzle. Measured cost on this part: 1024 triangles, 50 KB, and a mesh volume 0.081 mm³ above exact (7.3e-4 %).
+- **Why not finer:** The error is already far below both printer resolution and slicer arithmetic. Halving the tolerance roughly doubles the file for no change to anything printed.
+- **Angular tolerance:** The looser of the two at a 5 mm radius, so the linear limit sets the facet count here. Kept as a guard for small-radius features on future parts, where the linear limit alone would permit very coarse angular steps.
+- **Binary over ASCII:** Same geometry, about a fifth the size, and no float formatting round trip through text.
+- **Reversibility:** High. One constant, consumed in one place.
+
+## D15 — STL volume is checked against the exact volume, bound 1 mm³ (2026-10-03)
+- **What:** `src/kernel/stl.test.ts` parses the exported binary STL, sums the signed tetrahedra volumes, and requires the result to be above the exact volume by less than 1 mm³.
+- **Why a signed check:** Facet corners sit on the true surface, so the hole the mesh describes is a polygon inscribed in the real circle. That removes slightly less material than the exact cylinder, so the error has a known direction, not just a known size. Checking the direction catches a class of mistakes a magnitude check would not.
+- **Why 1 mm³:** 0.009% of the part. Roughly twelve times the deviation this tolerance actually produces, so it will not break when replicad adjusts its tessellator, and far below the 785 mm³ a missing hole would cost or the 1000x of a metre/millimetre mix-up.
+- **Also checks:** that the mesh is watertight and consistently wound (otherwise the sum is meaningless), the bounding box is 40 x 30 x 10, and the underside sits on z = 0.

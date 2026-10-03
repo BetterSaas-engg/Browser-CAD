@@ -50,6 +50,32 @@
       #status[data-state="error"] {
         color: #ff8a8a;
       }
+      #export-stl {
+        font: inherit;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: #e6e8ea;
+        background: #2f6f4e;
+        border: 1px solid #3d8a62;
+        border-radius: 4px;
+        padding: 0.3rem 0.85rem;
+        cursor: pointer;
+      }
+      #export-stl:hover:not(:disabled) {
+        background: #37815b;
+      }
+      #export-stl:disabled {
+        background: #2a2f36;
+        border-color: #3a424b;
+        color: #6d7681;
+        cursor: not-allowed;
+      }
+      #note {
+        margin: 0;
+        font-size: 0.75rem;
+        color: #9aa3ad;
+        min-width: 14ch;
+      }
       /* The canvas sizes itself to this element, so it must have a real height
          of its own rather than being driven by its content. */
       #viewport {
@@ -88,6 +114,11 @@
       <h1>browser-cad</h1>
       <p class="part">40 &times; 30 &times; 10 mm plate, 10 mm hole through the centre</p>
       <p id="status">Starting…</p>
+      <!-- Disabled in the markup, not just from script: there is a window
+           between parsing this and main.ts running where it would otherwise
+           be clickable with no part to export. -->
+      <button id="export-stl" type="button" disabled>Export STL</button>
+      <p id="note"></p>
     </header>
     <div id="viewport"></div>
     <p class="hint">
