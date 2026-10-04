@@ -33,11 +33,6 @@
         margin: 0;
         letter-spacing: 0.02em;
       }
-      .part {
-        font-size: 0.8125rem;
-        color: #9aa3ad;
-        margin: 0;
-      }
       #status {
         margin: 0;
         margin-left: auto;
@@ -76,11 +71,57 @@
         color: #9aa3ad;
         min-width: 14ch;
       }
+
+      main {
+        flex: 1 1 auto;
+        min-height: 0;
+        display: flex;
+      }
+      #controls {
+        flex: none;
+        width: 15rem;
+        padding: 1rem 1.25rem;
+        border-right: 1px solid #333a42;
+        overflow-y: auto;
+      }
+      .field {
+        display: block;
+        margin-bottom: 0.9rem;
+      }
+      .field > span:first-child {
+        display: block;
+        font-size: 0.75rem;
+        color: #9aa3ad;
+        margin-bottom: 0.2rem;
+      }
+      .field select,
+      .field input {
+        font: inherit;
+        font-size: 0.875rem;
+        width: 100%;
+        box-sizing: border-box;
+        color: #e6e8ea;
+        background: #262b32;
+        border: 1px solid #3a424b;
+        border-radius: 4px;
+        padding: 0.3rem 0.5rem;
+      }
+      .field input.invalid {
+        border-color: #ff8a8a;
+        background: #332326;
+      }
+      .field-error {
+        display: block;
+        min-height: 1.1em;
+        font-size: 0.7rem;
+        color: #ff8a8a;
+      }
+
       /* The canvas sizes itself to this element, so it must have a real height
          of its own rather than being driven by its content. */
       #viewport {
         flex: 1 1 auto;
-        min-height: 0;
+        min-width: 0;
         position: relative;
       }
       #viewport canvas {
@@ -112,15 +153,17 @@
   <body>
     <header>
       <h1>browser-cad</h1>
-      <p class="part">40 &times; 30 &times; 10 mm plate, 10 mm hole through the centre</p>
       <p id="status">Starting…</p>
       <!-- Disabled in the markup, not just from script: there is a window
            between parsing this and main.ts running where it would otherwise
-           be clickable with no part to export. -->
+           be clickable with no shape to export. -->
       <button id="export-stl" type="button" disabled>Export STL</button>
       <p id="note"></p>
     </header>
-    <div id="viewport"></div>
+    <main>
+      <div id="controls"></div>
+      <div id="viewport"></div>
+    </main>
     <p class="hint">
       Drag to orbit &middot; scroll to zoom &middot; right-drag to pan &middot; grid
       squares are 10 mm &middot; X red, Y green, Z blue

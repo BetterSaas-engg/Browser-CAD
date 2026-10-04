@@ -1,8 +1,8 @@
-import { beforeAll, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { setOC } from "replicad";
 import initOpenCascade from "replicad-opencascadejs";
-import { BOX_WITH_HOLE, expectedVolumeMm3 } from "./shapes";
-import { boxWithHoleStl } from "./stl";
+import { SHAPES, defaultsFor } from "../shapes/shapeLibrary";
+import { STL_EXPORT_OPTIONS, shapeStl } from "./stl";
 
 beforeAll(async () => {
   setOC(await initOpenCascade());
@@ -20,9 +20,8 @@ interface ParsedStl {
 }
 
 /**
- * Parse a binary STL. Written out rather than pulled from a library so the
- * test checks the bytes we actually produced, not a shared interpretation of
- * them.
+ * Parse a binary STL. Written out rather than pulled from a library so the test
+ * checks the bytes we actually produced, not a shared interpretation of them.
  */
 function parseBinaryStl(bytes: ArrayBuffer): ParsedStl {
   const view = new DataView(bytes);
@@ -53,9 +52,7 @@ function meshVolumeMm3({ corners }: ParsedStl): number {
   for (let i = 0; i < corners.length; i += 9) {
     const [ax, ay, az, bx, by, bz, cx, cy, cz] = corners.subarray(i, i + 9);
     six +=
-      ax * (by * cz - bz * cy) -
-      ay * (bx * cz - bz * cx) +
-      az * (bx * cy - by * cx);
+      ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
   }
   return six / 6;
 }
@@ -72,39 +69,52 @@ function bounds({ corners }: ParsedStl) {
   return { min, max };
 }
 
-it("writes a well formed binary STL", async () => {
-  const parsed = parseBinaryStl(await boxWithHoleStl());
-  // parseBinaryStl already asserts the byte length matches the triangle count,
-  // which is what would fail first if this were ASCII.
-  expect(parsed.triangles).toBeGreaterThan(100);
-});
+describe.each(SHAPES.map((shape) => [shape.id, shape] as const))("%s", (_id, shape) => {
+  const params = defaultsFor(shape);
 
-it("exports at millimetre scale, Z up, sitting on z = 0", async () => {
-  const { min, max } = bounds(parseBinaryStl(await boxWithHoleStl()));
-  const { width, depth, height } = BOX_WITH_HOLE;
+  // Export once and share it. Tessellating a sphere finely is the slowest thing
+  // in the suite, and doing it per assertion was enough to blow the timeout.
+  let filename: string;
+  let parsed: ParsedStl;
+  beforeAll(async () => {
+    const result = await shapeStl(shape.id, params);
+    filename = result.filename;
+    parsed = parseBinaryStl(result.bytes);
+  }, 60_000);
 
-  expect(max[0] - min[0]).toBeCloseTo(width, 3);
-  expect(max[1] - min[1]).toBeCloseTo(depth, 3);
-  expect(max[2] - min[2]).toBeCloseTo(height, 3);
-  // Flat on the bed rather than sunk into it or floating above it.
-  expect(min[2]).toBeCloseTo(0, 4);
-});
+  it("writes a well formed binary STL named after the shape", () => {
+    expect(filename).toBe(`${shape.filename(params)}.stl`);
+    // parseBinaryStl asserts the byte length matches the triangle count, which
+    // is what would fail first if this were ASCII.
+    expect(parsed.triangles).toBeGreaterThan(3);
+  });
 
-it("encloses the exact kernel volume to within 1 mm³", async () => {
-  const exact = expectedVolumeMm3();
-  const mesh = meshVolumeMm3(parseBinaryStl(await boxWithHoleStl()));
+  it("exports at millimetre scale sitting on z = 0", () => {
+    const { min, max } = bounds(parsed);
+    const expected = shape.boundingBoxMm(params);
 
-  // The STL approximates the hole's cylinder with flat facets whose corners sit
-  // on the true surface, so the hole it describes is a polygon inscribed in the
-  // real circle. That removes slightly less material than the exact cylinder,
-  // which puts the mesh volume a little ABOVE the exact one — a signed check,
-  // not just a magnitude one.
-  expect(mesh).toBeGreaterThan(exact);
+    // Facets are inscribed in the true surface, so each end of a diameter can
+    // sit up to one chord tolerance inside it — a sphere's STL really is a few
+    // microns smaller than the sphere. Allow that much under, and nothing over:
+    // an exported shape must never come out larger than it was asked to be.
+    const slack = 2 * STL_EXPORT_OPTIONS.tolerance;
+    for (let axis = 0; axis < 3; axis++) {
+      const measured = max[axis] - min[axis];
+      expect(measured).toBeLessThanOrEqual(expected[axis] + 1e-5);
+      expect(measured).toBeGreaterThan(expected[axis] - slack);
+    }
+    // Flat on the bed rather than sunk into it or floating above it.
+    expect(min[2]).toBeCloseTo(0, 3);
+  });
 
-  // 1 mm³ is 0.009% of the part. It sits well above the faceting error this
-  // tolerance actually produces, so it will not go off when replicad changes
-  // its tessellator slightly, and far below the 785 mm³ a missing hole would
-  // cost or the 1000x a metre/millimetre units mix-up would.
-  expect(mesh - exact).toBeLessThan(1);
-  expect(mesh).toBeCloseTo(exact, 0);
+  it("matches the exact volume within 0.1%", () => {
+    const exact = shape.volumeMm3(params);
+    const mesh = meshVolumeMm3(parsed);
+
+    // Facet corners sit on the true surface, so curves are approximated by
+    // inscribed polyhedra: a convex solid comes out slightly under its exact
+    // volume, a subtracted cylinder slightly over. Flat-faced shapes are exact.
+    // The direction varies by shape, so only the magnitude is asserted here.
+    expect(Math.abs(mesh - exact) / exact).toBeLessThan(0.001);
+  });
 });

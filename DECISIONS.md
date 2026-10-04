@@ -85,3 +85,26 @@ Format: what we decided, why, what we rejected, and how reversible it is.
 - **Order:** Comes after the parameters bite, so the AI has named parameters to target.
 - **Guardrails:** Generated code runs only in the worker. The checks we already have — volume and bounding box — catch obvious errors before anything is exported.
 - **Rejected for now:** AI in slicing or printer control, since Bambu Studio covers both. Also AI for printability checks: deterministic geometry rules are more reliable for deciding, though AI may later explain what those rules found.
+
+## D17 — STL export tolerance relaxed to 0.005 mm (2026-10-04, revises D14)
+- **What:** `STL_EXPORT_OPTIONS.tolerance` goes from 0.001 mm to 0.005 mm. The angular tolerance and binary format are unchanged.
+- **Why:** D14 set 0.001 mm on a part whose only curve was a single hole, where it cost almost nothing. A doubly-curved surface shows the real price. Measured on a 40 mm sphere: **201,198 triangles, 9.6 MB, 6.7 s** at 0.001 mm against **40,352 triangles, 1.9 MB, 0.5 s** at 0.005 mm. A cylinder barely notices (1,540 vs 1,004 triangles) and flat-faced shapes are exact either way.
+- **Why this is still far more than enough:** 5 µm of chord deviation is about one eightieth of a 0.4 mm nozzle. Nothing downstream can see it.
+- **What it changed:** the exported plate's volume error grows from 0.081 mm³ to roughly 0.4 mm³, still under 0.004%. D15's test bound is now expressed as a relative 0.1% across all shapes rather than an absolute 1 mm³, since volumes now span four orders of magnitude.
+- **Reversibility:** High. One constant.
+
+## D18 — A shape library, with each shape defined once (2026-10-04)
+- **What:** `src/shapes/shapeLibrary.ts` holds every shape as a single entry: parameters, defaults, limits, build function, volume formula, bounding-box formula and export filename. Adding a shape is one entry and no other edit.
+- **Why the formulas live beside the builder:** the tests compare the kernel's measured volume and bounding box against them, so each entry carries its own specification. A new shape arrives with its own test coverage.
+- **Reversibility:** High for now. It gets harder once shapes stop being single primitives and need feature history.
+
+## D19 — The worker owns the library; the UI gets plain data (2026-10-04)
+- **What:** The shape library imports replicad, so the page must not import it. The worker sends a serialisable catalogue — ids, labels and parameter specs — in its `ready` message, and the UI builds the form from that. The UI imports only *types* from the library, which TypeScript erases.
+- **Why:** Keeps D11's separation intact. Measured: the page bundle grew 2.4 kB for the whole shape picker, against roughly 300 kB had replicad followed the import in.
+- **Cost:** The form cannot render until the kernel is ready. Acceptable — there is nothing to build before then anyway.
+- **Consequence:** Cross-field rules must be serialisable too, hence the declarative `lessThan` on a parameter rather than a validation function.
+
+## D20 — The triangular prism is centred on its centroid, not its bounding box (2026-10-04)
+- **What:** Every shape sits on z = 0 and is centred on the origin in X and Y, except that an equilateral triangle cannot do both at once. Its centroid is on the origin; its bounding box therefore is not, extending to +R in Y and −R/2 in the other direction.
+- **Why:** The origin is a datum. The centroid is the shape's actual centre, and the one that will matter when shapes are combined or rotated. A bounding-box-centred triangle would put the datum somewhere with no geometric meaning.
+- **Watch:** The bounding-box test exempts this shape in Y and pins the centroid behaviour separately, so the exemption cannot silently widen.

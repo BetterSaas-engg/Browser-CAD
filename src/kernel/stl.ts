@@ -1,27 +1,30 @@
 /**
- * STL export. Like shapes.ts this is geometry only — no worker, no DOM — so
- * the exported bytes can be checked by Vitest in plain Node.
+ * STL export. Like build.ts this is geometry only — no worker, no DOM — so the
+ * exported bytes can be checked by Vitest in plain Node.
  */
-import { makeBoxWithHole } from "./shapes";
-
-/** What the downloaded file is called. */
-export const STL_FILENAME = "plate-with-hole.stl";
+import { shapeById } from "../shapes/shapeLibrary";
+import type { ParamValues } from "../shapes/shapeLibrary";
 
 /**
- * Tessellation for export, finer than the 0.01 mm / 0.1 rad used for display.
+ * Tessellation for export, twice as fine as the 0.01 mm / 0.1 rad used for
+ * display.
  *
- * The display mesh only has to look round on screen; these bytes are the part.
- * At 0.001 mm the facets of the 5 mm hole sit about 1 µm inside the true
- * cylinder — two orders of magnitude below anything an A1 can resolve with a
- * 0.4 mm nozzle, so slicing sees a circle. Going finer only grows the file.
+ * The display mesh only has to look round; these bytes are the part. At
+ * 0.005 mm the facets sit 5 µm inside the true surface — about one eightieth of
+ * a 0.4 mm nozzle, so slicing sees a smooth curve.
  *
- * The angular limit is the looser of the two at this radius, so the linear
- * tolerance is what actually sets the facet count. It is kept as a guard for
- * small-radius features on future parts, where the linear limit alone would
- * allow very coarse angular steps.
+ * This was 0.001 mm until a doubly-curved surface showed what that costs: a
+ * 40 mm sphere came out at 201,198 triangles, 9.6 MB and 6.7 s, against 40,352
+ * triangles, 1.9 MB and 0.5 s at 0.005 mm. Five times the chord error is still
+ * far below anything printable; five times the triangles is not free. Singly
+ * curved shapes barely notice either way, and flat-faced ones are exact
+ * regardless. See D17, which revises D14.
+ *
+ * The angular limit binds on large-radius curves where the linear tolerance
+ * alone would allow very coarse angular steps.
  */
 export const STL_EXPORT_OPTIONS = {
-  tolerance: 0.001,
+  tolerance: 0.005,
   angularTolerance: 0.05,
   /**
    * Binary rather than ASCII: same geometry, roughly a fifth of the size, and
@@ -30,16 +33,22 @@ export const STL_EXPORT_OPTIONS = {
   binary: true,
 } as const;
 
+export interface StlExport {
+  filename: string;
+  bytes: ArrayBuffer;
+}
+
 /**
- * The part as STL bytes.
+ * A shape as STL bytes, named after itself.
  *
- * Built from the exact kernel solid, not from the display mesh, so the export
+ * Built from the exact kernel solid rather than the display mesh, so the export
  * does not inherit the viewport's coarser tolerance. Coordinates are the
- * kernel's own: millimetres, Z up, with the part's underside on z = 0 so it
- * lands flat on the bed. STL itself carries no unit or orientation metadata —
- * millimetres is the convention every slicer, Bambu Studio included, assumes.
+ * kernel's own: millimetres, Z up, underside on z = 0 so it lands flat on the
+ * bed. STL itself carries no unit or orientation metadata — millimetres is the
+ * convention every slicer, Bambu Studio included, assumes.
  */
-export async function boxWithHoleStl(): Promise<ArrayBuffer> {
-  const blob = makeBoxWithHole().blobSTL(STL_EXPORT_OPTIONS);
-  return blob.arrayBuffer();
+export async function shapeStl(shapeId: string, params: ParamValues): Promise<StlExport> {
+  const shape = shapeById(shapeId);
+  const blob = shape.build(params).blobSTL(STL_EXPORT_OPTIONS);
+  return { filename: `${shape.filename(params)}.stl`, bytes: await blob.arrayBuffer() };
 }

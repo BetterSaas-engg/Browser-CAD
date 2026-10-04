@@ -1,21 +1,28 @@
 /**
  * Worker plumbing: pull the OpenCascade WebAssembly build off the main thread,
- * hand it to replicad, then run geometry on request. Nothing in here knows the
- * shape's dimensions — that is shapes.ts.
+ * hand it to replicad, then build shapes on request. Nothing in here knows what
+ * any shape is — that is the shape library.
+ *
+ * The worker also owns the library itself and sends the UI a plain-data
+ * catalogue of it, so the UI never imports replicad.
  */
 import { setOC } from "replicad";
 import initOpenCascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
-import { buildBoxWithHole } from "./shapes";
-import { boxWithHoleStl, STL_FILENAME } from "./stl";
+import { buildShape } from "./build";
+import { shapeStl } from "./stl";
+import { catalog } from "../shapes/shapeLibrary";
 import { meshBuffers } from "../mesh";
+import type { ParamValues, ShapeCatalogEntry } from "../shapes/shapeLibrary";
 import type { PartMesh } from "../mesh";
 
-export type WorkerRequest = { type: "build" } | { type: "exportStl" };
+export type WorkerRequest =
+  | { type: "build"; requestId: number; shapeId: string; params: ParamValues }
+  | { type: "exportStl"; shapeId: string; params: ParamValues };
 
 export type WorkerResponse =
-  | { type: "ready" }
-  | { type: "result"; volumeMm3: number; mesh: PartMesh }
+  | { type: "ready"; catalog: ShapeCatalogEntry[] }
+  | { type: "result"; requestId: number; volumeMm3: number; mesh: PartMesh }
   | { type: "stl"; filename: string; bytes: ArrayBuffer }
   | { type: "error"; message: string; stack?: string };
 
@@ -52,7 +59,7 @@ const kernelReady: Promise<void> = initOpenCascade({
 });
 
 kernelReady.then(
-  () => ctx.postMessage({ type: "ready" }),
+  () => ctx.postMessage({ type: "ready", catalog: catalog() }),
   (error: unknown) => fail("Kernel failed to load", error),
 );
 
@@ -62,15 +69,19 @@ ctx.onmessage = async (event) => {
     await kernelReady;
     switch (request?.type) {
       case "build": {
-        const { volumeMm3, mesh } = buildBoxWithHole();
+        const { volumeMm3, mesh } = buildShape(request.shapeId, request.params);
         // Hand the mesh buffers over rather than cloning them; the worker has
-        // no further use for them.
-        ctx.postMessage({ type: "result", volumeMm3, mesh }, meshBuffers(mesh));
+        // no further use for them. The request id goes back out so the page can
+        // drop results for edits the user has already typed past.
+        ctx.postMessage(
+          { type: "result", requestId: request.requestId, volumeMm3, mesh },
+          meshBuffers(mesh),
+        );
         break;
       }
       case "exportStl": {
-        const bytes = await boxWithHoleStl();
-        ctx.postMessage({ type: "stl", filename: STL_FILENAME, bytes }, [bytes]);
+        const { filename, bytes } = await shapeStl(request.shapeId, request.params);
+        ctx.postMessage({ type: "stl", filename, bytes }, [bytes]);
         break;
       }
       default:

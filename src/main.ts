@@ -1,9 +1,12 @@
 /**
- * Page UI: owns the status line and talks to the kernel worker. Deliberately
- * knows nothing about geometry.
+ * Page UI: owns the status line, the controls and the worker conversation.
+ * Deliberately knows nothing about geometry — the shape library lives in the
+ * worker, and arrives here as plain data.
  */
 import type { WorkerRequest, WorkerResponse } from "./kernel/worker";
+import type { ParamValues } from "./shapes/shapeLibrary";
 import { createViewport } from "./viewport/viewport";
+import { createShapeControls } from "./ui/shapeControls";
 
 function requireElement(selector: string): HTMLElement {
   const element = document.querySelector<HTMLElement>(selector);
@@ -14,6 +17,7 @@ function requireElement(selector: string): HTMLElement {
 const statusEl = requireElement("#status");
 const errorEl = requireElement("#error");
 const viewportEl = requireElement("#viewport");
+const controlsEl = requireElement("#controls");
 const exportButton = requireElement("#export-stl") as HTMLButtonElement;
 /** Export feedback, kept apart from the status line so the volume stays visible. */
 const noteEl = requireElement("#note");
@@ -27,6 +31,12 @@ function showError(context: string, error: unknown): void {
     error instanceof Error ? error.message : String(error)
   }`;
   errorEl.hidden = false;
+}
+
+function clearError(): void {
+  errorEl.hidden = true;
+  errorEl.textContent = "";
+  delete statusEl.dataset.state;
 }
 
 /** Hand a generated file to the browser's downloader. */
@@ -67,31 +77,69 @@ worker.onerror = (event) => {
   showError("Kernel worker crashed", event.message || "see console");
 };
 
-// Nothing to export until the kernel has produced a part.
+/**
+ * Rebuilds are debounced, so several can be in flight at once and they are not
+ * guaranteed to come back in order. Each carries an id, and anything older than
+ * the newest result is dropped.
+ */
+let nextRequestId = 1;
+let newestShown = 0;
+let controls: ReturnType<typeof createShapeControls> | null = null;
+let paramsValid = true;
+
+function requestBuild(shapeId: string, params: ParamValues): void {
+  clearError();
+  statusEl.textContent = "Building…";
+  worker.postMessage({
+    type: "build",
+    requestId: nextRequestId++,
+    shapeId,
+    params,
+  } satisfies WorkerRequest);
+}
+
 exportButton.disabled = true;
 exportButton.addEventListener("click", () => {
+  const selection = controls?.current();
+  if (!selection) return;
   exportButton.disabled = true;
   noteEl.textContent = "Exporting…";
-  worker.postMessage({ type: "exportStl" } satisfies WorkerRequest);
+  worker.postMessage({ type: "exportStl", ...selection } satisfies WorkerRequest);
 });
 
 worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
   const message = event.data;
   switch (message.type) {
-    case "ready":
+    case "ready": {
       statusEl.textContent = "Kernel ready";
-      worker.postMessage({ type: "build" } satisfies WorkerRequest);
+      controls = createShapeControls(controlsEl, {
+        catalog: message.catalog,
+        onChange: requestBuild,
+        onValidityChange: (valid) => {
+          paramsValid = valid;
+          // Never export something the viewport is not showing.
+          exportButton.disabled = !valid;
+          if (!valid) noteEl.textContent = "";
+        },
+      });
+      const selection = controls.current();
+      if (selection) requestBuild(selection.shapeId, selection.params);
       break;
+    }
     case "result":
+      // A slower earlier build landing after a newer one would show stale
+      // geometry; ignore anything we have already been overtaken by.
+      if (message.requestId < newestShown) break;
+      newestShown = message.requestId;
       try {
         viewport.showPart(message.mesh);
       } catch (error) {
-        showError("Could not render the part", error);
+        showError("Could not render the shape", error);
         break;
       }
       statusEl.textContent = `Volume: ${message.volumeMm3.toFixed(3)} mm³`;
       statusEl.dataset.state = "done";
-      exportButton.disabled = false;
+      exportButton.disabled = !paramsValid;
       break;
     case "stl":
       try {
