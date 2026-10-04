@@ -9,16 +9,17 @@
 import { setOC } from "replicad";
 import initOpenCascade from "replicad-opencascadejs";
 import wasmUrl from "replicad-opencascadejs/wasm?url";
-import { buildShape } from "./build";
-import { shapeStl } from "./stl";
+import { buildDesign } from "./build";
+import { designStl } from "./stl";
 import { catalog } from "../shapes/shapeLibrary";
 import { meshBuffers } from "../mesh";
-import type { ParamValues, ShapeCatalogEntry } from "../shapes/shapeLibrary";
+import type { ShapeCatalogEntry } from "../shapes/shapeLibrary";
+import type { Design } from "../design";
 import type { PartMesh } from "../mesh";
 
 export type WorkerRequest =
-  | { type: "build"; requestId: number; shapeId: string; params: ParamValues }
-  | { type: "exportStl"; shapeId: string; params: ParamValues };
+  | { type: "build"; requestId: number; design: Design }
+  | { type: "exportStl"; design: Design };
 
 export type WorkerResponse =
   | { type: "ready"; catalog: ShapeCatalogEntry[] }
@@ -69,7 +70,7 @@ ctx.onmessage = async (event) => {
     await kernelReady;
     switch (request?.type) {
       case "build": {
-        const { volumeMm3, mesh } = buildShape(request.shapeId, request.params);
+        const { volumeMm3, mesh } = buildDesign(request.design);
         // Hand the mesh buffers over rather than cloning them; the worker has
         // no further use for them. The request id goes back out so the page can
         // drop results for edits the user has already typed past.
@@ -80,7 +81,7 @@ ctx.onmessage = async (event) => {
         break;
       }
       case "exportStl": {
-        const { filename, bytes } = await shapeStl(request.shapeId, request.params);
+        const { filename, bytes } = await designStl(request.design);
         ctx.postMessage({ type: "stl", filename, bytes }, [bytes]);
         break;
       }
@@ -88,6 +89,6 @@ ctx.onmessage = async (event) => {
         throw new Error(`Unknown request ${JSON.stringify(request)}`);
     }
   } catch (error) {
-    fail(request?.type === "exportStl" ? "STL export failed" : "Geometry failed", error);
+    fail(request?.type === "exportStl" ? "STL export failed" : "Could not build the design", error);
   }
 };

@@ -108,3 +108,26 @@ Format: what we decided, why, what we rejected, and how reversible it is.
 - **What:** Every shape sits on z = 0 and is centred on the origin in X and Y, except that an equilateral triangle cannot do both at once. Its centroid is on the origin; its bounding box therefore is not, extending to +R in Y and −R/2 in the other direction.
 - **Why:** The origin is a datum. The centroid is the shape's actual centre, and the one that will matter when shapes are combined or rotated. A bounding-box-centred triangle would put the datum somewhere with no geometric meaning.
 - **Watch:** The bounding-box test exempts this shape in Y and pins the centroid behaviour separately, so the exemption cannot silently widen.
+
+## D21 — The combined result is re-seated on z = 0 (2026-10-04)
+- **What:** After every item has been applied, the finished solid is translated so its lowest point sits on z = 0. Items are positioned relative to one another; where the combination lands in Z is not something to manage by hand.
+- **Why:** The part has to arrive in the slicer sitting on the bed. Doing it once at the end, rather than constraining each item, means a cut can take material off the underside and what remains still lands flat.
+- **Consequence:** An item's Z position is relative, not absolute. Lifting the only item in a design by 25 mm changes nothing on screen. That is the intended behaviour, but it does surprise people.
+- **Rejected:** Forbidding negative Z, which would have made "slice the bottom off" impossible to express.
+- **Reversibility:** High. One translate at the end of `buildDesignShape`.
+
+## D22 — The first item is always an addition (2026-10-04)
+- **What:** `design.items[0].operation` is forced to `"add"`. The kernel refuses a design that starts with a cut, and the UI disables the operation control for item 1 and coerces any item moved to the top.
+- **Why:** There is nothing to cut from before the first item exists. The alternative — treating a leading cut as an error the user has to resolve — makes reordering needlessly sharp-edged.
+- **Watch:** Moving a cut to the top silently changes it to an addition, and moving it back down does not restore it. The operation is visible on every row in the list, so the change is not hidden, but it is not undoable either.
+
+## D23 — A design is plain JSON (2026-10-04)
+- **What:** `src/design.ts` defines a design as a list of items, each a shape id, its parameters, a position, a rotation about Z, and an operation. No classes, no ids, no functions, no back-references.
+- **Why:** The same structure has to survive being saved to a file, pasted into a prompt, and written by a model (D16). Anything that only makes sense in memory would have to be stripped at each of those boundaries.
+- **Why no item ids:** The UI tracks the selected item by index and moves the selection when the list is reordered. An id would be state the format does not otherwise need, and would have to be invented by anything generating a design.
+- **Cost:** The UI holds the one mutable copy and sends a `structuredClone` to the worker, so a build in flight cannot be changed underneath by further typing.
+
+## D24 — A new item is added, not cut (2026-10-04)
+- **What:** The "+ Add" button creates an item with operation `"add"`.
+- **Why:** Cutting is the more common next step, and that was the first implementation — but a default-sized cut at the origin swallows a default-sized base whole, so the design broke the instant the button was pressed. Found in a browser, not in the tests.
+- **Consequence:** Switching to Cut is a deliberate act, normally after the shape has been sized and placed. That ordering is also the one that avoids a transient empty result mid-edit.

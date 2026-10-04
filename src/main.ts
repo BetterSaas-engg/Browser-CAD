@@ -4,9 +4,9 @@
  * worker, and arrives here as plain data.
  */
 import type { WorkerRequest, WorkerResponse } from "./kernel/worker";
-import type { ParamValues } from "./shapes/shapeLibrary";
+import type { Design } from "./design";
 import { createViewport } from "./viewport/viewport";
-import { createShapeControls } from "./ui/shapeControls";
+import { createDesignControls } from "./ui/designControls";
 
 function requireElement(selector: string): HTMLElement {
   const element = document.querySelector<HTMLElement>(selector);
@@ -84,27 +84,28 @@ worker.onerror = (event) => {
  */
 let nextRequestId = 1;
 let newestShown = 0;
-let controls: ReturnType<typeof createShapeControls> | null = null;
-let paramsValid = true;
+let controls: ReturnType<typeof createDesignControls> | null = null;
+let formValid = true;
+/** Cleared when the kernel rejects a design, so export cannot run ahead of it. */
+let lastBuildSucceeded = false;
 
-function requestBuild(shapeId: string, params: ParamValues): void {
+function requestBuild(design: Design): void {
   clearError();
   statusEl.textContent = "Building…";
   worker.postMessage({
     type: "build",
     requestId: nextRequestId++,
-    shapeId,
-    params,
+    design,
   } satisfies WorkerRequest);
 }
 
 exportButton.disabled = true;
 exportButton.addEventListener("click", () => {
-  const selection = controls?.current();
-  if (!selection) return;
+  const design = controls?.current();
+  if (!design) return;
   exportButton.disabled = true;
   noteEl.textContent = "Exporting…";
-  worker.postMessage({ type: "exportStl", ...selection } satisfies WorkerRequest);
+  worker.postMessage({ type: "exportStl", design } satisfies WorkerRequest);
 });
 
 worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
@@ -112,18 +113,18 @@ worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
   switch (message.type) {
     case "ready": {
       statusEl.textContent = "Kernel ready";
-      controls = createShapeControls(controlsEl, {
+      controls = createDesignControls(controlsEl, {
         catalog: message.catalog,
         onChange: requestBuild,
         onValidityChange: (valid) => {
-          paramsValid = valid;
+          formValid = valid;
           // Never export something the viewport is not showing.
-          exportButton.disabled = !valid;
+          exportButton.disabled = !valid || !lastBuildSucceeded;
           if (!valid) noteEl.textContent = "";
         },
       });
-      const selection = controls.current();
-      if (selection) requestBuild(selection.shapeId, selection.params);
+      const design = controls.current();
+      if (design) requestBuild(design);
       break;
     }
     case "result":
@@ -139,7 +140,8 @@ worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       }
       statusEl.textContent = `Volume: ${message.volumeMm3.toFixed(3)} mm³`;
       statusEl.dataset.state = "done";
-      exportButton.disabled = !paramsValid;
+      lastBuildSucceeded = true;
+      exportButton.disabled = !formValid;
       break;
     case "stl":
       try {
@@ -159,8 +161,10 @@ worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       noteEl.textContent = "";
       if (message.stack) console.error(message.stack);
       showError("Kernel error", new Error(message.message));
-      // Let them try again — the kernel is still loaded.
-      exportButton.disabled = false;
+      // The viewport is deliberately left alone: the last design that did
+      // build stays on screen, so the error has something to be read against.
+      lastBuildSucceeded = false;
+      exportButton.disabled = true;
       break;
   }
 };

@@ -29,6 +29,8 @@ export interface ParamSpec {
   /** Inclusive. Zero only where a shape genuinely allows it (a cone's tip). */
   min: number;
   max: number;
+  /** For validation messages. Millimetres unless stated — angles say so. */
+  unit?: string;
   /** Keys this value must stay strictly below, e.g. a hole inside a plate. */
   lessThan?: string[];
 }

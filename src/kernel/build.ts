@@ -7,6 +7,7 @@ import { measureVolume } from "replicad";
 import type { Shape3D } from "replicad";
 import { shapeById } from "../shapes/shapeLibrary";
 import type { ParamValues } from "../shapes/shapeLibrary";
+import type { Design, DesignItem } from "../design";
 import type { PartMesh } from "../mesh";
 
 /**
@@ -41,5 +42,64 @@ export interface PartData {
  */
 export function buildShape(shapeId: string, params: ParamValues): PartData {
   const shape = shapeById(shapeId).build(params);
+  return { volumeMm3: measureVolume(shape), mesh: toPartMesh(shape) };
+}
+
+/** Build one item from the library and put it where the design says. */
+function placeItem(item: DesignItem): Shape3D {
+  const shape = shapeById(item.shapeId).build(item.params);
+  // Rotate about the origin first, then translate — so position means "where
+  // the shape's own origin ends up", regardless of how it is turned.
+  const rotated = item.rotationZ ? shape.rotate(item.rotationZ, [0, 0, 0], [0, 0, 1]) : shape;
+  const { x, y, z } = item.position;
+  return x || y || z ? rotated.translate([x, y, z]) : rotated;
+}
+
+/**
+ * Combine a design into a single solid.
+ *
+ * Items apply strictly in list order, each fused onto or subtracted from the
+ * result so far, and the finished solid is dropped so its lowest point is on
+ * z = 0 (D21).
+ */
+export function buildDesignShape(design: Design): Shape3D {
+  const items = design.items;
+  if (items.length === 0) {
+    throw new Error("The design is empty. Add a shape to start.");
+  }
+  if (items[0].operation !== "add") {
+    throw new Error("The first item must be added, not cut — there is nothing to cut from yet.");
+  }
+
+  let result = placeItem(items[0]);
+  for (let i = 1; i < items.length; i++) {
+    const item = items[i];
+    const piece = placeItem(item);
+    result = item.operation === "add" ? result.fuse(piece) : result.cut(piece);
+
+    // Check as we go rather than only at the end, so the message can name the
+    // item that emptied the part. An empty result is a Compound whose
+    // boundingBox throws, so this has to happen before anything measures it.
+    if (measureVolume(result) <= 0) {
+      throw new Error(
+        `Item ${i + 1} (${item.operation} ${item.shapeId}) removed everything. ` +
+          "Nothing is left to show.",
+      );
+    }
+  }
+
+  if (measureVolume(result) <= 0) {
+    throw new Error("The design came out empty.");
+  }
+
+  // Re-seat on the bed. Items are positioned relative to each other; where the
+  // combined result lands in Z is not something the user should have to manage.
+  const lowestZ = result.boundingBox.bounds[0][2];
+  return lowestZ === 0 ? result : result.translate([0, 0, -lowestZ]);
+}
+
+/** A whole design, ready for the viewport. */
+export function buildDesign(design: Design): PartData {
+  const shape = buildDesignShape(design);
   return { volumeMm3: measureVolume(shape), mesh: toPartMesh(shape) };
 }

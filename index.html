@@ -79,10 +79,94 @@
       }
       #controls {
         flex: none;
-        width: 15rem;
-        padding: 1rem 1.25rem;
+        width: 17rem;
+        padding: 0.75rem 1rem 2rem;
         border-right: 1px solid #333a42;
         overflow-y: auto;
+      }
+      #controls h2 {
+        font-size: 0.7rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #7d8793;
+        margin: 1.1rem 0 0.4rem;
+      }
+      #controls h2:first-child {
+        margin-top: 0;
+      }
+      #item-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      #item-list button.item {
+        font: inherit;
+        font-size: 0.8125rem;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 0.5rem;
+        width: 100%;
+        text-align: left;
+        color: #e6e8ea;
+        background: #262b32;
+        border: 1px solid #3a424b;
+        border-radius: 4px;
+        padding: 0.3rem 0.5rem;
+        margin-bottom: 0.25rem;
+        cursor: pointer;
+      }
+      #item-list button.item[aria-current="true"] {
+        border-color: #5c9ded;
+        background: #2b3644;
+      }
+      .op {
+        font-size: 0.65rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        border-radius: 3px;
+        padding: 0.05rem 0.3rem;
+      }
+      .op-add {
+        color: #7fd1a0;
+        background: #233a2e;
+      }
+      .op-cut {
+        color: #ffb38a;
+        background: #3a2d23;
+      }
+      .item-buttons {
+        display: flex;
+        gap: 0.25rem;
+        margin-top: 0.4rem;
+      }
+      .item-buttons button {
+        font: inherit;
+        font-size: 0.75rem;
+        flex: 1 1 auto;
+        color: #e6e8ea;
+        background: #2a3038;
+        border: 1px solid #3a424b;
+        border-radius: 4px;
+        padding: 0.25rem 0.2rem;
+        cursor: pointer;
+      }
+      .item-buttons button:hover:not(:disabled) {
+        background: #343c46;
+      }
+      .item-buttons button:disabled {
+        color: #5c646d;
+        cursor: not-allowed;
+      }
+      #item-up,
+      #item-down {
+        flex: 0 0 2rem;
+      }
+      .note-inline {
+        margin: -0.5rem 0 0.9rem;
+        font-size: 0.7rem;
+        color: #7d8793;
       }
       .field {
         display: block;

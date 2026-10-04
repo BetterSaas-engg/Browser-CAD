@@ -4,6 +4,8 @@
  */
 import { shapeById } from "../shapes/shapeLibrary";
 import type { ParamValues } from "../shapes/shapeLibrary";
+import { buildDesignShape } from "./build";
+import type { Design } from "../design";
 
 /**
  * Tessellation for export, twice as fine as the 0.01 mm / 0.1 rad used for
@@ -51,4 +53,15 @@ export async function shapeStl(shapeId: string, params: ParamValues): Promise<St
   const shape = shapeById(shapeId);
   const blob = shape.build(params).blobSTL(STL_EXPORT_OPTIONS);
   return { filename: `${shape.filename(params)}.stl`, bytes: await blob.arrayBuffer() };
+}
+
+/**
+ * A whole design as STL bytes.
+ *
+ * Flat-named for now: a combined part has no single key dimension to name it
+ * after the way one primitive does.
+ */
+export async function designStl(design: Design): Promise<StlExport> {
+  const blob = buildDesignShape(design).blobSTL(STL_EXPORT_OPTIONS);
+  return { filename: "design.stl", bytes: await blob.arrayBuffer() };
 }
