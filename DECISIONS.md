@@ -131,3 +131,21 @@ Format: what we decided, why, what we rejected, and how reversible it is.
 - **What:** The "+ Add" button creates an item with operation `"add"`.
 - **Why:** Cutting is the more common next step, and that was the first implementation — but a default-sized cut at the origin swallows a default-sized base whole, so the design broke the instant the button was pressed. Found in a browser, not in the tests.
 - **Consequence:** Switching to Cut is a deliberate act, normally after the shape has been sized and placed. That ordering is also the one that avoids a transient empty result mid-edit.
+
+## D25 — Rebuilding never moves the camera (2026-10-04)
+- **What:** `showPart` draws the new geometry and leaves the camera exactly where it was. Only the very first part is framed automatically, because there is no view to preserve yet. A **Fit view** button re-frames on demand.
+- **Why:** The whole point of a live parametric view is to line up on a detail and watch it change. Re-framing on every rebuild threw that away on every keystroke, which made the viewport unusable for the thing it is for.
+- **What still follows the part:** the near and far clip planes, recomputed from the live camera distance on each rebuild and on each orbit. They have to track the part or a design that grows pokes through the far plane — and moving them moves no camera.
+- **Consequence:** make a part far larger or smaller and it can leave the view entirely. Fit view is the way back, and it is in the header rather than buried in the sidebar for that reason.
+
+## D26 — A reorder that would put a Cut first is refused, not corrected (2026-10-04, revises D22)
+- **What:** Moving a Cut to the top, or removing the item that would leave a Cut first, is blocked and explained in the sidebar. D22 silently flipped the item to Add instead.
+- **Why:** The coercion edited the user's design behind their back and could not be undone. It also meant the list could change meaning without them asking for anything. Refusing leaves them in control and says what to fix.
+- **Consequence:** `normaliseDesign` is gone. Nothing silently repairs the order now; the UI prevents the two moves that could break it, and the kernel still rejects a leading cut outright, so there are two layers of defence and no silent third.
+- **Note:** the same rule covers Remove, which D22 did not consider — removing item 1 above a Cut is the same hazard by a different route.
+
+## D27 — The app is exactly the window; only the sidebar scrolls (2026-10-04)
+- **What:** `html, body { overflow: hidden }`, a flex column of header / main / hint / error, and `#controls` as the single scrollable region. The viewport is never scrolled out of reach.
+- **The bug this fixed:** `renderer.setSize(w, h, false)` writes the *backing store* resolution into the canvas's width and height attributes — `w × devicePixelRatio`. With no CSS size pinning it, the canvas laid itself out at that size. On a display at 150% scaling the canvas rendered 1.5× its container and pushed scrollbars onto the page in both directions. Measured at 1366 x 768 and 150%: 506 px of horizontal and 207 px of vertical overflow.
+- **The fix:** the canvas is `position: absolute; inset: 0; width: 100%; height: 100%`, so it is out of flow entirely and can never affect layout, while `setSize(…, false)` keeps the backing store at full device resolution so it stays sharp. The pixel ratio is re-read on every resize, since dragging a window between monitors changes it.
+- **Watch:** any future element in the viewport must also be taken out of flow, or it can reintroduce this.

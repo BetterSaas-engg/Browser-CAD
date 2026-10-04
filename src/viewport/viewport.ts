@@ -32,8 +32,16 @@ const GRID_EXTENT_MM = 200;
 const GRID_STEP_MM = 10;
 
 export interface Viewport {
-  /** Draw a part, replacing whatever was shown before, and frame it. */
+  /**
+   * Draw a part, replacing whatever was shown before.
+   *
+   * Deliberately does not move the camera: editing a dimension must not throw
+   * away the view you had lined up. Only the very first part is framed
+   * automatically, because there is no view to preserve yet. See D25.
+   */
   showPart(mesh: PartMesh): void;
+  /** Re-frame the current part. Driven by the Fit view button. */
+  fitView(): void;
 }
 
 export function createViewport(container: HTMLElement): Viewport {
@@ -97,6 +105,9 @@ export function createViewport(container: HTMLElement): Viewport {
 
   let part: Mesh | null = null;
   let edges: LineSegments | null = null;
+  /** The current part's extent, kept so Fit view has something to aim at. */
+  let partBounds: Box3 | null = null;
+  let framedOnce = false;
 
   function clearPart(): void {
     for (const object of [part, edges]) {
@@ -124,34 +135,66 @@ export function createViewport(container: HTMLElement): Viewport {
     scene.add(edges);
 
     surface.computeBoundingBox();
-    frame(surface.boundingBox);
+    partBounds = surface.boundingBox;
+
+    // The clip planes still follow the part, because a part that grew a lot
+    // would otherwise poke through the far plane. That moves no camera.
+    updateClipPlanes();
+
+    // Only the first part gets framed. After that the view is the user's.
+    if (!framedOnce) {
+      framedOnce = true;
+      fitView();
+    }
   }
 
   /** Pull the camera back far enough to fit the part, looking down from a corner. */
-  function frame(box: Box3 | null): void {
-    if (!box) return;
-    const center = box.getCenter(new Vector3());
-    const radius = Math.max(box.getSize(new Vector3()).length() / 2, 1);
+  function fitView(): void {
+    if (!partBounds) return;
+    const center = partBounds.getCenter(new Vector3());
+    const radius = Math.max(partBounds.getSize(new Vector3()).length() / 2, 1);
     const distance = radius / Math.sin((camera.fov * Math.PI) / 360);
 
     const direction = new Vector3(1, -1, 0.75).normalize();
     camera.position.copy(center).addScaledVector(direction, distance * 1.2);
-
-    // Fit the clip planes to the part. The depth buffer's precision is spent
-    // across the near-to-far range, so leaving a default 0.1-to-10000 span
-    // starves the part of resolution and lets the grid and axis lines draw
-    // straight through solid material.
-    camera.near = Math.max(radius / 100, 0.01);
-    camera.far = Math.max(distance * 10, GRID_EXTENT_MM * 4);
-    camera.updateProjectionMatrix();
-
     controls.target.copy(center);
     controls.update();
+    updateClipPlanes();
   }
+
+  /**
+   * Keep the depth range tight around wherever the camera actually is.
+   *
+   * The depth buffer's precision is spent across near-to-far, so a fixed
+   * 0.1-to-10000 span starves the part of resolution and lets the grid and
+   * axis lines draw through solid material. Recomputed from the live camera
+   * distance rather than once at framing time, so it stays right after the
+   * user zooms.
+   */
+  function updateClipPlanes(): void {
+    if (!partBounds) return;
+    const center = partBounds.getCenter(new Vector3());
+    const radius = Math.max(partBounds.getSize(new Vector3()).length() / 2, 1);
+    const distance = camera.position.distanceTo(center);
+
+    camera.near = Math.max((distance - radius) / 100, radius / 1000, 0.01);
+    camera.far = Math.max((distance + radius) * 4, GRID_EXTENT_MM * 4);
+    camera.updateProjectionMatrix();
+  }
+
+  controls.addEventListener("change", updateClipPlanes);
 
   function resize(): void {
     const { clientWidth, clientHeight } = container;
     if (clientWidth === 0 || clientHeight === 0) return;
+
+    // Re-read the pixel ratio every time: dragging the window to a monitor with
+    // different scaling changes it, and a stale ratio renders soft.
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    // `false` leaves the canvas's CSS size alone — the stylesheet pins it to
+    // the container. Letting three.js write a pixel size here is what made the
+    // canvas lay out at devicePixelRatio times its container and push
+    // scrollbars onto the page.
     renderer.setSize(clientWidth, clientHeight, false);
     camera.aspect = clientWidth / clientHeight;
     camera.updateProjectionMatrix();
@@ -167,5 +210,5 @@ export function createViewport(container: HTMLElement): Viewport {
     renderer.render(scene, camera);
   });
 
-  return { showPart };
+  return { showPart, fitView };
 }

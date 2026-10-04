@@ -5,30 +5,42 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>browser-cad</title>
     <style>
+      /* ---- shell -------------------------------------------------------- */
+      /* The app is exactly the window. Nothing here may scroll the page: the
+         only scrollable region is the sidebar, and it scrolls inside itself. */
       html,
       body {
         height: 100%;
         margin: 0;
+        overflow: hidden;
       }
       body {
         display: flex;
         flex-direction: column;
         font-family: system-ui, sans-serif;
-        line-height: 1.5;
+        line-height: 1.4;
         background: #1e2228;
         color: #e6e8ea;
       }
+      main {
+        flex: 1 1 auto;
+        /* Without this a flex child refuses to shrink below its content, and
+           the sidebar pushes the whole layout taller than the window. */
+        min-height: 0;
+        display: flex;
+      }
+
+      /* ---- header ------------------------------------------------------- */
       header {
         flex: none;
         display: flex;
-        align-items: baseline;
-        gap: 1rem;
-        flex-wrap: wrap;
-        padding: 0.75rem 1.25rem;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.45rem 0.9rem;
         border-bottom: 1px solid #333a42;
       }
       h1 {
-        font-size: 1rem;
+        font-size: 0.9rem;
         font-weight: 700;
         margin: 0;
         letter-spacing: 0.02em;
@@ -36,8 +48,10 @@
       #status {
         margin: 0;
         margin-left: auto;
+        font-size: 0.85rem;
         font-variant-numeric: tabular-nums;
         font-weight: 600;
+        white-space: nowrap;
       }
       #status[data-state="done"] {
         color: #7fd1a0;
@@ -45,21 +59,29 @@
       #status[data-state="error"] {
         color: #ff8a8a;
       }
-      #export-stl {
+      header button {
         font: inherit;
-        font-size: 0.8125rem;
+        font-size: 0.78rem;
         font-weight: 600;
+        white-space: nowrap;
         color: #e6e8ea;
-        background: #2f6f4e;
-        border: 1px solid #3d8a62;
+        background: #2a3038;
+        border: 1px solid #3a424b;
         border-radius: 4px;
-        padding: 0.3rem 0.85rem;
+        padding: 0.3rem 0.7rem;
         cursor: pointer;
+      }
+      header button:hover:not(:disabled) {
+        background: #343c46;
+      }
+      #export-stl {
+        background: #2f6f4e;
+        border-color: #3d8a62;
       }
       #export-stl:hover:not(:disabled) {
         background: #37815b;
       }
-      #export-stl:disabled {
+      header button:disabled {
         background: #2a2f36;
         border-color: #3a424b;
         color: #6d7681;
@@ -67,34 +89,37 @@
       }
       #note {
         margin: 0;
-        font-size: 0.75rem;
+        font-size: 0.7rem;
         color: #9aa3ad;
-        min-width: 14ch;
+        max-width: 18ch;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
 
-      main {
-        flex: 1 1 auto;
-        min-height: 0;
-        display: flex;
-      }
+      /* ---- sidebar ------------------------------------------------------ */
       #controls {
         flex: none;
-        width: 17rem;
-        padding: 0.75rem 1rem 2rem;
+        width: 15.5rem;
+        padding: 0.6rem 0.75rem 1.5rem;
         border-right: 1px solid #333a42;
+        /* The one scrollable region in the app. */
         overflow-y: auto;
+        overflow-x: hidden;
+        scrollbar-width: thin;
       }
       #controls h2 {
-        font-size: 0.7rem;
+        font-size: 0.65rem;
         font-weight: 700;
         text-transform: uppercase;
         letter-spacing: 0.06em;
         color: #7d8793;
-        margin: 1.1rem 0 0.4rem;
+        margin: 0.85rem 0 0.3rem;
       }
       #controls h2:first-child {
         margin-top: 0;
       }
+
       #item-list {
         list-style: none;
         margin: 0;
@@ -102,19 +127,19 @@
       }
       #item-list button.item {
         font: inherit;
-        font-size: 0.8125rem;
+        font-size: 0.78rem;
         display: flex;
         justify-content: space-between;
         align-items: center;
-        gap: 0.5rem;
+        gap: 0.4rem;
         width: 100%;
         text-align: left;
         color: #e6e8ea;
         background: #262b32;
         border: 1px solid #3a424b;
         border-radius: 4px;
-        padding: 0.3rem 0.5rem;
-        margin-bottom: 0.25rem;
+        padding: 0.25rem 0.4rem;
+        margin-bottom: 0.2rem;
         cursor: pointer;
       }
       #item-list button.item[aria-current="true"] {
@@ -122,11 +147,11 @@
         background: #2b3644;
       }
       .op {
-        font-size: 0.65rem;
+        font-size: 0.6rem;
         text-transform: uppercase;
-        letter-spacing: 0.05em;
+        letter-spacing: 0.04em;
         border-radius: 3px;
-        padding: 0.05rem 0.3rem;
+        padding: 0.05rem 0.25rem;
       }
       .op-add {
         color: #7fd1a0;
@@ -138,18 +163,19 @@
       }
       .item-buttons {
         display: flex;
-        gap: 0.25rem;
-        margin-top: 0.4rem;
+        gap: 0.2rem;
+        margin-top: 0.3rem;
       }
       .item-buttons button {
         font: inherit;
-        font-size: 0.75rem;
+        font-size: 0.72rem;
         flex: 1 1 auto;
         color: #e6e8ea;
         background: #2a3038;
         border: 1px solid #3a424b;
         border-radius: 4px;
-        padding: 0.25rem 0.2rem;
+        /* Roomy enough to hit comfortably even though the text is small. */
+        padding: 0.3rem 0.2rem;
         cursor: pointer;
       }
       .item-buttons button:hover:not(:disabled) {
@@ -161,56 +187,109 @@
       }
       #item-up,
       #item-down {
-        flex: 0 0 2rem;
+        flex: 0 0 1.9rem;
       }
-      .note-inline {
-        margin: -0.5rem 0 0.9rem;
+
+      /* A short-lived explanation of a refused action. */
+      #controls-message {
+        margin: 0.4rem 0 0;
+        padding: 0.35rem 0.45rem;
         font-size: 0.7rem;
-        color: #7d8793;
+        border-radius: 4px;
+        color: #ffd9b0;
+        background: #3a2d23;
+        border: 1px solid #6b4f33;
       }
+      #controls-message:empty {
+        display: none;
+      }
+
+      /* ---- fields ------------------------------------------------------- */
       .field {
         display: block;
-        margin-bottom: 0.9rem;
+        margin-bottom: 0.5rem;
       }
       .field > span:first-child {
         display: block;
-        font-size: 0.75rem;
+        font-size: 0.68rem;
         color: #9aa3ad;
-        margin-bottom: 0.2rem;
+        margin-bottom: 0.1rem;
+        /* Long labels stay on one line rather than doubling a field's height. */
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
       .field select,
       .field input {
         font: inherit;
-        font-size: 0.875rem;
+        font-size: 0.82rem;
         width: 100%;
         box-sizing: border-box;
         color: #e6e8ea;
         background: #262b32;
         border: 1px solid #3a424b;
         border-radius: 4px;
-        padding: 0.3rem 0.5rem;
+        /* Comfortably clickable: the row is ~28px tall at this font size. */
+        padding: 0.25rem 0.4rem;
+      }
+      .field input:focus,
+      .field select:focus {
+        outline: 2px solid #5c9ded;
+        outline-offset: -1px;
       }
       .field input.invalid {
         border-color: #ff8a8a;
         background: #332326;
       }
+      /* Reserves no height until there is something to say — over seven fields
+         an always-present blank line costs most of a screenful. */
       .field-error {
         display: block;
-        min-height: 1.1em;
-        font-size: 0.7rem;
+        font-size: 0.68rem;
         color: #ff8a8a;
       }
+      .field-error:empty {
+        display: none;
+      }
 
-      /* The canvas sizes itself to this element, so it must have a real height
-         of its own rather than being driven by its content. */
+      /* Short related fields share a row. */
+      .field-row {
+        display: grid;
+        gap: 0.35rem;
+        margin-bottom: 0.5rem;
+      }
+      .field-row.cols-2 {
+        grid-template-columns: 1fr 1fr;
+      }
+      .field-row.cols-3 {
+        grid-template-columns: 1fr 1fr 1fr;
+      }
+      .field-row .field {
+        margin-bottom: 0;
+        min-width: 0;
+      }
+
+      /* ---- viewport ----------------------------------------------------- */
       #viewport {
         flex: 1 1 auto;
+        /* Lets the viewport shrink; without it the canvas sets a floor. */
         min-width: 0;
+        min-height: 0;
         position: relative;
       }
+      /* Taken out of flow entirely. The canvas's own width/height attributes
+         are its backing-store resolution, which is devicePixelRatio times its
+         display size — if it were ever allowed to drive layout it would push
+         the page wider than the window on any scaled display. */
       #viewport canvas {
         display: block;
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
       }
+
+      /* ---- footer ------------------------------------------------------- */
       #error {
         flex: none;
         margin: 0;
@@ -218,19 +297,22 @@
         color: #ffd4d4;
         background: #3a1d20;
         border-top: 2px solid #ff8a8a;
-        padding: 0.75rem 1.25rem;
+        padding: 0.5rem 0.9rem;
         font-family: ui-monospace, monospace;
-        font-size: 0.8125rem;
-        max-height: 30vh;
+        font-size: 0.75rem;
+        max-height: 25vh;
         overflow: auto;
       }
       .hint {
         flex: none;
         margin: 0;
-        padding: 0.5rem 1.25rem;
-        font-size: 0.75rem;
+        padding: 0.3rem 0.9rem;
+        font-size: 0.7rem;
         color: #7d8793;
         border-top: 1px solid #333a42;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
       }
     </style>
   </head>
@@ -238,9 +320,10 @@
     <header>
       <h1>browser-cad</h1>
       <p id="status">Starting…</p>
+      <button id="fit-view" type="button" title="Re-frame the part">Fit view</button>
       <!-- Disabled in the markup, not just from script: there is a window
            between parsing this and main.ts running where it would otherwise
-           be clickable with no shape to export. -->
+           be clickable with no design to export. -->
       <button id="export-stl" type="button" disabled>Export STL</button>
       <p id="note"></p>
     </header>

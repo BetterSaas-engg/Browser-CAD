@@ -6,8 +6,8 @@
  * library needs no change here. Imports only types from the library, which are
  * erased at build time — this module never pulls replicad into the page bundle.
  */
-import { OPERATIONS, TRANSFORM_PARAMS, newItem, normaliseDesign } from "../design";
-import type { Design, Operation } from "../design";
+import { OPERATIONS, TRANSFORM_PARAMS, newItem } from "../design";
+import type { Design, DesignItem, Operation } from "../design";
 import type { ParamSpec, ParamValues, ShapeCatalogEntry } from "../shapes/shapeLibrary";
 
 /** How long to wait after the last keystroke before rebuilding. */
@@ -126,7 +126,9 @@ export function createDesignControls(
   });
   const removeButton = button("item-remove", "Remove", () => {
     if (design.items.length <= 1) return;
-    design.items.splice(selected, 1);
+    const remaining = design.items.filter((_, i) => i !== selected);
+    if (refuseIfCutWouldLead(remaining, "Removing this would leave a Cut first.")) return;
+    design.items = remaining;
     selected = Math.min(selected, design.items.length - 1);
     afterStructuralChange();
   });
@@ -142,11 +144,29 @@ export function createDesignControls(
     return el;
   }
 
+  /**
+   * Refuse a reorder or removal that would put a Cut at the top, and say why.
+   *
+   * The first item has nothing to cut from. Silently flipping it to Add — which
+   * is what this used to do — edits the design behind the user's back and
+   * cannot be undone. Refusing and explaining leaves them in control (D26).
+   */
+  function refuseIfCutWouldLead(next: DesignItem[], lead: string): boolean {
+    if (next[0]?.operation !== "cut") return false;
+    showMessage(`${lead} The first item must be Add, since there is nothing to cut from yet.`);
+    return true;
+  }
+
   function move(delta: number): void {
     const target = selected + delta;
     if (target < 0 || target >= design.items.length) return;
-    const [item] = design.items.splice(selected, 1);
-    design.items.splice(target, 0, item);
+
+    const next = [...design.items];
+    const [item] = next.splice(selected, 1);
+    next.splice(target, 0, item);
+    if (refuseIfCutWouldLead(next, "That would move a Cut to the top.")) return;
+
+    design.items = next;
     selected = target;
     afterStructuralChange();
   }
@@ -154,6 +174,22 @@ export function createDesignControls(
   const listButtons = document.createElement("div");
   listButtons.className = "item-buttons";
   listButtons.append(addButton, removeButton, upButton, downButton);
+
+  const messageEl = document.createElement("p");
+  messageEl.id = "controls-message";
+  let messageTimer: ReturnType<typeof setTimeout> | undefined;
+
+  /** Explain a refused action, then get out of the way. */
+  function showMessage(text: string): void {
+    messageEl.textContent = text;
+    clearTimeout(messageTimer);
+    messageTimer = setTimeout(() => (messageEl.textContent = ""), 6000);
+  }
+
+  function clearMessage(): void {
+    clearTimeout(messageTimer);
+    messageEl.textContent = "";
+  }
 
   // --- item editor ---------------------------------------------------------
   const editorTitle = document.createElement("h2");
@@ -187,6 +223,9 @@ export function createDesignControls(
 
   const paramsEl = document.createElement("div");
   const transformEl = document.createElement("div");
+  /** Names the X/Y/Z row, whose own labels are a single letter each. */
+  const placementHeading = document.createElement("h2");
+  placementHeading.textContent = "Position (mm)";
 
   const editor = document.createElement("div");
   editor.id = "item-editor";
@@ -201,7 +240,7 @@ export function createDesignControls(
 
   const itemsHeading = document.createElement("h2");
   itemsHeading.textContent = "Items";
-  container.append(itemsHeading, list, listButtons, editor);
+  container.append(itemsHeading, list, listButtons, messageEl, editor);
 
   let paramFields: Field[] = [];
   let transformFields: Field[] = [];
@@ -212,17 +251,30 @@ export function createDesignControls(
     return shape;
   }
 
-  function makeField(spec: ParamSpec, value: number): Field & { element: HTMLElement } {
+  function makeField(
+    spec: ParamSpec,
+    value: number,
+    shortLabel?: string,
+  ): Field & { element: HTMLElement } {
     const input = document.createElement("input");
     input.type = "number";
     input.step = "any";
     input.value = String(value);
     input.id = `param-${spec.key}`;
+    input.title = spec.label;
     input.addEventListener("input", () => commit(false));
 
     const error = document.createElement("span");
     error.className = "field-error";
-    return { spec, input, error, element: labelled(spec.label, input, error) };
+    return { spec, input, error, element: labelled(shortLabel ?? spec.label, input, error) };
+  }
+
+  /** Put short fields side by side rather than stacking them. */
+  function row(columns: "cols-2" | "cols-3", fields: HTMLElement[]): HTMLElement {
+    const el = document.createElement("div");
+    el.className = `field-row ${columns}`;
+    el.append(...fields);
+    return el;
   }
 
   function renderList(): void {
@@ -267,11 +319,24 @@ export function createDesignControls(
     paramFields = made;
     paramsEl.replaceChildren(...made.map((f) => f.element));
 
+    const isAxis = (key: string) => key === "x" || key === "y" || key === "z";
     const placement = TRANSFORM_PARAMS.map((spec) =>
-      makeField(spec, spec.key === "rotationZ" ? item.rotationZ : item.position[spec.key as "x" | "y" | "z"]),
+      makeField(
+        spec,
+        isAxis(spec.key) ? item.position[spec.key as "x" | "y" | "z"] : item.rotationZ,
+        // X, Y and Z are one character each; spelling out "Position X" three
+        // times down the sidebar wastes three rows to say almost nothing. The
+        // full label stays as the input's tooltip.
+        isAxis(spec.key) ? spec.key.toUpperCase() : undefined,
+      ),
     );
     transformFields = placement;
-    transformEl.replaceChildren(...placement.map((f) => f.element));
+
+    // Partitioned by key rather than by index, so reordering TRANSFORM_PARAMS
+    // cannot silently put the wrong field in the three-column row.
+    const axes = placement.filter((f) => isAxis(f.spec.key)).map((f) => f.element);
+    const rest = placement.filter((f) => !isAxis(f.spec.key)).map((f) => f.element);
+    transformEl.replaceChildren(placementHeading, row("cols-3", axes), ...rest);
   }
 
   /** Read the form into the selected item, and schedule a rebuild. */
@@ -300,7 +365,9 @@ export function createDesignControls(
 
   /** After adding, removing or reordering: repaint everything and rebuild. */
   function afterStructuralChange(): void {
-    normaliseDesign(design);
+    // Nothing silently repairs the order any more: the moves that could break
+    // it are refused up front, and the kernel rejects a leading cut outright.
+    clearMessage();
     renderList();
     renderEditor();
     commit(true);

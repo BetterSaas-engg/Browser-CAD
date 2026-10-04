@@ -19,6 +19,7 @@ const errorEl = requireElement("#error");
 const viewportEl = requireElement("#viewport");
 const controlsEl = requireElement("#controls");
 const exportButton = requireElement("#export-stl") as HTMLButtonElement;
+const fitButton = requireElement("#fit-view") as HTMLButtonElement;
 /** Export feedback, kept apart from the status line so the volume stays visible. */
 const noteEl = requireElement("#note");
 
@@ -98,6 +99,9 @@ function requestBuild(design: Design): void {
     design,
   } satisfies WorkerRequest);
 }
+
+// Re-framing is now the only thing that moves the camera, so it needs a button.
+fitButton.addEventListener("click", () => viewport.fitView());
 
 exportButton.disabled = true;
 exportButton.addEventListener("click", () => {

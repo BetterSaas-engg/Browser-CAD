@@ -64,12 +64,3 @@ export function newItem(shapeId: string, params: ParamValues, operation: Operati
   return { shapeId, params, position: { x: 0, y: 0, z: 0 }, rotationZ: 0, operation };
 }
 
-/**
- * The first item has nothing to be cut from, so it is always an addition.
- * Applied after any edit that can change which item comes first.
- */
-export function normaliseDesign(design: Design): Design {
-  const [first] = design.items;
-  if (first) first.operation = "add";
-  return design;
-}
