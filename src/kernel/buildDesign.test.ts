@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { measureVolume, setOC } from "replicad";
 import initOpenCascade from "replicad-opencascadejs";
 import { buildDesignShape } from "./build";
-import { newItem } from "../design";
+import { DESIGN_VERSION, newItem } from "../design";
 import type { Design, DesignItem } from "../design";
 import { shapeById } from "../shapes/shapeLibrary";
 
@@ -10,7 +10,7 @@ beforeAll(async () => {
   setOC(await initOpenCascade());
 }, 120_000);
 
-const design = (...items: DesignItem[]): Design => ({ items });
+const design = (...items: DesignItem[]): Design => ({ version: DESIGN_VERSION, items });
 
 const at = (item: DesignItem, x: number, y: number, z: number): DesignItem => ({
   ...item,
@@ -138,7 +138,7 @@ describe("re-seating on the bed", () => {
 
 describe("rejecting designs that cannot be built", () => {
   it("refuses an empty design", () => {
-    expect(() => buildDesignShape({ items: [] })).toThrow(/empty/i);
+    expect(() => buildDesignShape({ version: DESIGN_VERSION, items: [] })).toThrow(/empty/i);
   });
 
   it("refuses a design that starts with a cut", () => {

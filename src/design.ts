@@ -33,8 +33,19 @@ export interface DesignItem {
 }
 
 export interface Design {
+  /** Always {@link DESIGN_VERSION} on anything this app writes. */
+  version: number;
   items: DesignItem[];
 }
+
+/**
+ * The format number carried by every saved design.
+ *
+ * Bump it whenever the meaning of the fields changes in a way that would make
+ * an older file wrong rather than merely incomplete. A file whose version this
+ * app does not recognise is refused outright rather than guessed at — see D28.
+ */
+export const DESIGN_VERSION = 1;
 
 /**
  * How far from the origin an item may be placed. The build volume in each
@@ -62,5 +73,20 @@ export const OPERATIONS: { value: Operation; label: string }[] = [
 /** An item at a shape's defaults, sitting on the origin, unrotated. */
 export function newItem(shapeId: string, params: ParamValues, operation: Operation = "add"): DesignItem {
   return { shapeId, params, position: { x: 0, y: 0, z: 0 }, rotationZ: 0, operation };
+}
+
+/** Every parameter of a shape at its declared default. */
+export function defaultParams(params: ParamSpec[]): ParamValues {
+  return Object.fromEntries(params.map((p) => [p.key, p.default]));
+}
+
+/**
+ * What you get on a first visit, and what New goes back to: one of the first
+ * shape in the catalogue, at its defaults.
+ */
+export function defaultDesign(catalog: { id: string; params: ParamSpec[] }[]): Design {
+  const [first] = catalog;
+  if (!first) throw new Error("The shape catalogue is empty");
+  return { version: DESIGN_VERSION, items: [newItem(first.id, defaultParams(first.params))] };
 }
 

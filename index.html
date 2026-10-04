@@ -35,9 +35,15 @@
         flex: none;
         display: flex;
         align-items: center;
-        gap: 0.75rem;
+        gap: 0.4rem;
+        /* Wraps to a second row on a narrow window rather than overflowing.
+           The header growing is harmless; main just gets the remaining height. */
+        flex-wrap: wrap;
         padding: 0.45rem 0.9rem;
         border-bottom: 1px solid #333a42;
+      }
+      header h1 {
+        margin-right: 0.35rem;
       }
       h1 {
         font-size: 0.9rem;
@@ -290,6 +296,9 @@
       }
 
       /* ---- footer ------------------------------------------------------- */
+      /* Two kinds of message share this panel. An error means the app failed
+         and the view may be stale; a notice means something was refused and
+         nothing changed. They should not look the same. */
       #error {
         flex: none;
         margin: 0;
@@ -302,6 +311,13 @@
         font-size: 0.75rem;
         max-height: 25vh;
         overflow: auto;
+      }
+      #error[data-kind="notice"] {
+        color: #ffe0bb;
+        background: #352a1d;
+        border-top-color: #d79a4e;
+        font-family: inherit;
+        font-size: 0.8rem;
       }
       .hint {
         flex: none;
@@ -320,6 +336,11 @@
     <header>
       <h1>browser-cad</h1>
       <p id="status">Starting…</p>
+      <button id="design-new" type="button" title="Start a fresh design">New</button>
+      <button id="design-open" type="button" title="Load a design from a .json file">Open</button>
+      <button id="design-save" type="button" title="Download the design as design.json">Save</button>
+      <!-- The real control is the Open button; this is only the mechanism. -->
+      <input id="design-file" type="file" accept=".json,application/json" hidden />
       <button id="fit-view" type="button" title="Re-frame the part">Fit view</button>
       <!-- Disabled in the markup, not just from script: there is a window
            between parsing this and main.ts running where it would otherwise

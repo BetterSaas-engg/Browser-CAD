@@ -5,6 +5,9 @@
  */
 import type { WorkerRequest, WorkerResponse } from "./kernel/worker";
 import type { Design } from "./design";
+import type { ShapeCatalogEntry } from "./shapes/shapeLibrary";
+import { defaultDesign } from "./design";
+import { autosave, parseDesign, restoreAutosave, serialiseDesign } from "./designFile";
 import { createViewport } from "./viewport/viewport";
 import { createDesignControls } from "./ui/designControls";
 
@@ -20,6 +23,10 @@ const viewportEl = requireElement("#viewport");
 const controlsEl = requireElement("#controls");
 const exportButton = requireElement("#export-stl") as HTMLButtonElement;
 const fitButton = requireElement("#fit-view") as HTMLButtonElement;
+const newButton = requireElement("#design-new") as HTMLButtonElement;
+const openButton = requireElement("#design-open") as HTMLButtonElement;
+const saveButton = requireElement("#design-save") as HTMLButtonElement;
+const fileInput = requireElement("#design-file") as HTMLInputElement;
 /** Export feedback, kept apart from the status line so the volume stays visible. */
 const noteEl = requireElement("#note");
 
@@ -31,17 +38,32 @@ function showError(context: string, error: unknown): void {
   errorEl.textContent = `${context}: ${
     error instanceof Error ? error.message : String(error)
   }`;
+  errorEl.dataset.kind = "error";
+  errorEl.hidden = false;
+}
+
+/**
+ * Say why something was refused, without claiming the app has failed.
+ *
+ * A rejected file leaves the current design untouched and still buildable, so
+ * the status line keeps showing its volume. Only the panel speaks up.
+ */
+function showNotice(text: string): void {
+  console.warn(`[browser-cad] ${text}`);
+  errorEl.textContent = text;
+  errorEl.dataset.kind = "notice";
   errorEl.hidden = false;
 }
 
 function clearError(): void {
   errorEl.hidden = true;
   errorEl.textContent = "";
+  delete errorEl.dataset.kind;
   delete statusEl.dataset.state;
 }
 
 /** Hand a generated file to the browser's downloader. */
-function download(filename: string, bytes: ArrayBuffer, type: string): void {
+function download(filename: string, bytes: ArrayBuffer | string, type: string): void {
   const url = URL.createObjectURL(new Blob([bytes], { type }));
   try {
     const link = document.createElement("a");
@@ -86,12 +108,15 @@ worker.onerror = (event) => {
 let nextRequestId = 1;
 let newestShown = 0;
 let controls: ReturnType<typeof createDesignControls> | null = null;
+let shapeCatalog: ShapeCatalogEntry[] = [];
 let formValid = true;
 /** Cleared when the kernel rejects a design, so export cannot run ahead of it. */
 let lastBuildSucceeded = false;
 
 function requestBuild(design: Design): void {
-  clearError();
+  // Only clear a previous build failure. A notice about a file or an autosave
+  // refers to something the user still needs to read.
+  if (errorEl.dataset.kind !== "notice") clearError();
   statusEl.textContent = "Building…";
   worker.postMessage({
     type: "build",
@@ -102,6 +127,66 @@ function requestBuild(design: Design): void {
 
 // Re-framing is now the only thing that moves the camera, so it needs a button.
 fitButton.addEventListener("click", () => viewport.fitView());
+
+/**
+ * Every edit goes through here: autosave first, then rebuild.
+ *
+ * Only edits autosave. The build that happens on page load does not, so a
+ * damaged autosave entry survives being read and reported — it is replaced the
+ * first time the user actually changes something, not the moment they look at
+ * the page. See D29.
+ */
+function onDesignChanged(design: Design): void {
+  autosave(design, window.localStorage);
+  requestBuild(design);
+}
+
+saveButton.addEventListener("click", () => {
+  const design = controls?.current();
+  if (!design) {
+    showNotice("Fix the highlighted field before saving.");
+    return;
+  }
+  download("design.json", serialiseDesign(design), "application/json");
+  noteEl.textContent = "Saved design.json";
+});
+
+// The button is the visible control; the file input is a hidden mechanism.
+openButton.addEventListener("click", () => fileInput.click());
+
+fileInput.addEventListener("change", async () => {
+  const file = fileInput.files?.[0];
+  // Reset immediately, or choosing the same file twice fires no second change.
+  fileInput.value = "";
+  if (!file || !controls) return;
+
+  let text: string;
+  try {
+    text = await file.text();
+  } catch (error) {
+    showNotice(`Could not read ${file.name}: ${error}`);
+    return;
+  }
+
+  const result = parseDesign(text, shapeCatalog);
+  if (!result.ok) {
+    // The design on screen is untouched, which is why this is a notice and not
+    // an error: nothing has broken, the file was simply not usable.
+    showNotice(`${file.name} was not loaded. ${result.problem}`);
+    return;
+  }
+  clearError();
+  noteEl.textContent = `Opened ${file.name}`;
+  controls.replace(result.design);
+});
+
+newButton.addEventListener("click", () => {
+  if (!controls) return;
+  if (!window.confirm("Start a new design? The current one will be replaced.")) return;
+  clearError();
+  noteEl.textContent = "";
+  controls.reset();
+});
 
 exportButton.disabled = true;
 exportButton.addEventListener("click", () => {
@@ -117,9 +202,22 @@ worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
   switch (message.type) {
     case "ready": {
       statusEl.textContent = "Kernel ready";
+      shapeCatalog = message.catalog;
+
+      // Pick up where they left off, unless the slot is empty or damaged.
+      const restored = restoreAutosave(shapeCatalog, window.localStorage);
+      if (restored.status === "unreadable") {
+        showNotice(
+          `Your last design could not be restored, so this is a fresh one. ${restored.problem}`,
+        );
+      }
+      const initialDesign =
+        restored.status === "restored" ? restored.design : defaultDesign(shapeCatalog);
+
       controls = createDesignControls(controlsEl, {
-        catalog: message.catalog,
-        onChange: requestBuild,
+        catalog: shapeCatalog,
+        initialDesign,
+        onChange: onDesignChanged,
         onValidityChange: (valid) => {
           formValid = valid;
           // Never export something the viewport is not showing.

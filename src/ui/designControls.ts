@@ -6,7 +6,7 @@
  * library needs no change here. Imports only types from the library, which are
  * erased at build time — this module never pulls replicad into the page bundle.
  */
-import { OPERATIONS, TRANSFORM_PARAMS, newItem } from "../design";
+import { OPERATIONS, TRANSFORM_PARAMS, defaultDesign, defaultParams, newItem } from "../design";
 import type { Design, DesignItem, Operation } from "../design";
 import type { ParamSpec, ParamValues, ShapeCatalogEntry } from "../shapes/shapeLibrary";
 
@@ -15,6 +15,8 @@ const DEBOUNCE_MS = 350;
 
 export interface DesignControlsOptions {
   catalog: ShapeCatalogEntry[];
+  /** What to open with — a restored autosave, or the default. */
+  initialDesign: Design;
   /** Called with a valid design, debounced. */
   onChange(design: Design): void;
   /** Called when validity changes, so the page can disable export. */
@@ -25,11 +27,6 @@ interface Field {
   spec: ParamSpec;
   input: HTMLInputElement;
   error: HTMLElement;
-}
-
-/** Every parameter at its default, without importing the library at runtime. */
-function defaultsFromSpecs(specs: ParamSpec[]): ParamValues {
-  return Object.fromEntries(specs.map((p) => [p.key, p.default]));
 }
 
 /**
@@ -99,13 +96,14 @@ function labelled(text: string, control: HTMLElement, error?: HTMLElement): HTML
 
 export function createDesignControls(
   container: HTMLElement,
-  { catalog, onChange, onValidityChange }: DesignControlsOptions,
+  { catalog, initialDesign, onChange, onValidityChange }: DesignControlsOptions,
 ) {
   if (catalog.length === 0) throw new Error("The shape catalogue is empty");
 
-  const design: Design = {
-    items: [newItem(catalog[0].id, defaultsFromSpecs(catalog[0].params))],
-  };
+  // Owned outright: the caller hands one over and never touches it again. Every
+  // design that leaves here is a clone, so a build in flight cannot be changed
+  // underneath by further typing.
+  let design: Design = structuredClone(initialDesign);
   let selected = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let lastValid = true;
@@ -120,7 +118,7 @@ export function createDesignControls(
     // a default-sized cut at the origin swallows a default-sized base whole:
     // the design would break the instant you clicked Add. Switching to Cut
     // should be a deliberate act, after the shape has been sized and placed.
-    design.items.splice(selected + 1, 0, newItem(shape.id, defaultsFromSpecs(shape.params), "add"));
+    design.items.splice(selected + 1, 0, newItem(shape.id, defaultParams(shape.params), "add"));
     selected += 1;
     afterStructuralChange();
   });
@@ -203,7 +201,7 @@ export function createDesignControls(
     const shape = shapeFor(shapePicker.value);
     const item = design.items[selected];
     item.shapeId = shape.id;
-    item.params = defaultsFromSpecs(shape.params);
+    item.params = defaultParams(shape.params);
     renderEditor();
     commit(true);
   });
@@ -383,6 +381,29 @@ export function createDesignControls(
       const placement = validateGroup(transformFields);
       if (!params || !placement) return null;
       return structuredClone(design);
+    },
+
+    /**
+     * Swap in a whole design — a loaded file, or a fresh start. Already
+     * validated by the caller; this only has to show it.
+     */
+    replace(next: Design): void {
+      design = structuredClone(next);
+      selected = 0;
+      clearMessage();
+      renderList();
+      renderEditor();
+      commit(true);
+    },
+
+    /** Back to a single default shape. */
+    reset(): void {
+      this.replace(defaultDesign(catalog));
+    },
+
+    /** Tell the user why something was refused, in the sidebar. */
+    notify(text: string): void {
+      showMessage(text);
     },
   };
 }

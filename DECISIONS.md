@@ -149,3 +149,22 @@ Format: what we decided, why, what we rejected, and how reversible it is.
 - **The bug this fixed:** `renderer.setSize(w, h, false)` writes the *backing store* resolution into the canvas's width and height attributes — `w × devicePixelRatio`. With no CSS size pinning it, the canvas laid itself out at that size. On a display at 150% scaling the canvas rendered 1.5× its container and pushed scrollbars onto the page in both directions. Measured at 1366 x 768 and 150%: 506 px of horizontal and 207 px of vertical overflow.
 - **The fix:** the canvas is `position: absolute; inset: 0; width: 100%; height: 100%`, so it is out of flow entirely and can never affect layout, while `setSize(…, false)` keeps the backing store at full device resolution so it stays sharp. The pixel ratio is re-read on every resize, since dragging a window between monitors changes it.
 - **Watch:** any future element in the viewport must also be taken out of flow, or it can reintroduce this.
+
+## D28 — Designs carry a version, and an unknown one is refused (2026-10-04)
+- **What:** Every design has `version: 1`. A file whose version is anything else is refused with a message naming both numbers, rather than being guessed at or coerced.
+- **Why:** The format will change. A file written by a later version may use fields this build does not understand, or the same fields to mean something else — and silently opening it would produce a part that is subtly not what the author drew.
+- **When to bump:** whenever a change would make an older file *wrong* rather than merely incomplete. Adding an optional field that defaults sensibly does not need a bump; changing what an existing field means does.
+- **Not built yet:** upgrading an old file to the current version. The version field is what makes that possible later; nothing reads it except the equality check.
+
+## D29 — Validation refuses; it never repairs (2026-10-04)
+- **What:** `src/designFile.ts` accepts a design exactly as written or rejects it with one specific problem, naming the item. Unknown fields at either level are an error, not something to ignore.
+- **Why:** A loader that quietly drops an item it does not understand, or substitutes a default for a value out of range, hands back something that is not what the file said. For a design that is about to be printed, a file that will not open is far better than one that opens wrong.
+- **Why strict about unknown fields:** silently ignoring `"Items"` or `"colour"` is the same failure in a smaller coat — the user's data is discarded without being mentioned. The version field is the intended route for genuinely new fields.
+- **Consequence:** hand-edited files are unforgiving. The message always says which item and which field, which is the thing that makes that tolerable.
+
+## D30 — Autosave to localStorage, and a damaged entry is kept (2026-10-04)
+- **What:** Every edit writes the design to `browser-cad:design:v1`. On load it is validated like any other input; a damaged entry produces a message and a default design.
+- **Why the entry is not deleted:** it may be the only copy of the user's work. Throwing it away to stop a message recurring trades their data for our tidiness. It stays until a real edit replaces it, and until then it can be rescued by hand from devtools.
+- **Why only edits autosave:** the build that runs on page load does not write, so merely opening the page cannot overwrite a damaged entry before the user has seen the message about it.
+- **Storage failures are swallowed:** a full quota or a private window costs the convenience of autosave, not the ability to keep modelling.
+- **Not done:** multiple named slots, or any history. One slot, last state wins.
