@@ -129,15 +129,31 @@ function requestBuild(design: Design): void {
 fitButton.addEventListener("click", () => viewport.fitView());
 
 /**
+ * Whether the last autosave write failed, so the notice is shown once per
+ * episode rather than on every keystroke — and so recovery can be announced.
+ */
+let autosaveFailing = false;
+
+/**
  * Every edit goes through here: autosave first, then rebuild.
  *
  * Only edits autosave. The build that happens on page load does not, so a
  * damaged autosave entry survives being read and reported — it is replaced the
  * first time the user actually changes something, not the moment they look at
- * the page. See D29.
+ * the page. See D30.
  */
 function onDesignChanged(design: Design): void {
-  autosave(design, window.localStorage);
+  const saved = autosave(design, window.localStorage);
+  if (!saved.ok && !autosaveFailing) {
+    // Said once, not on every keystroke: a full quota fails on every write, and
+    // a notice that reappears forever is one the user learns to ignore.
+    showNotice(`${saved.problem} Use Save to keep a copy as a file.`);
+  } else if (saved.ok && autosaveFailing) {
+    noteEl.textContent = "Autosave is working again";
+    if (errorEl.dataset.kind === "notice") clearError();
+  }
+  autosaveFailing = !saved.ok;
+
   requestBuild(design);
 }
 

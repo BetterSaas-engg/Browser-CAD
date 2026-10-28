@@ -166,5 +166,73 @@ Format: what we decided, why, what we rejected, and how reversible it is.
 - **What:** Every edit writes the design to `browser-cad:design:v1`. On load it is validated like any other input; a damaged entry produces a message and a default design.
 - **Why the entry is not deleted:** it may be the only copy of the user's work. Throwing it away to stop a message recurring trades their data for our tidiness. It stays until a real edit replaces it, and until then it can be rescued by hand from devtools.
 - **Why only edits autosave:** the build that runs on page load does not write, so merely opening the page cannot overwrite a damaged entry before the user has seen the message about it.
-- **Storage failures are swallowed:** a full quota or a private window costs the convenience of autosave, not the ability to keep modelling.
+- **Storage failures are swallowed:** a full quota or a private window costs the convenience of autosave, not the ability to keep modelling. **Revised by D31** — the cost stands, the silence does not.
 - **Not done:** multiple named slots, or any history. One slot, last state wins.
+
+## D31 — An autosave that fails says so (2026-10-28, revises D30)
+- **What:** `autosave` returns `{ ok }` instead of `void`, and the page shows a notice the first time a write fails, naming the likely cause. It says so once per failing spell, not once per keystroke, and announces recovery if a later write succeeds.
+- **Why:** D30 was right that a failed write should not stop you modelling, and wrong to conclude that nothing needed saying. Autosave failing is silent *and* invisible: the design on screen looks exactly the same, and the loss only appears on the next refresh — by which time the one moment the user could have done something about it, by pressing Save, has passed.
+- **Why once per spell:** a full quota fails on every write. A notice that reappears on every keystroke is one you learn to scroll past, which puts us back where D30 was.
+- **Why a notice and not an error:** nothing has broken. The kernel is fine, the part is fine, and the status line should keep showing the volume. Same distinction the file loader already draws.
+- **Reversibility:** High. One return type and one branch in `onDesignChanged`.
+
+## D32 — Two fonts bundled, OFL-1.1, static instances (2026-10-28)
+- **What:** `src/assets/fonts/` holds **Noto Sans Regular** (clear sans) and **Nunito Bold** (bold rounded), each beside its upstream `OFL.txt`. Both are SIL Open Font License 1.1, which permits bundling and redistribution — compatible with the permissive-only rule in CLAUDE.md.
+- **Why these two:** the brief asked for one clear sans-serif and one bold rounded face. Both carry every character the Text shape promises, which was checked against the files rather than assumed — `fonts.test.ts` re-checks it on every run, so a font swap cannot quietly drop `×` or `÷`.
+- **Static, not variable:** the canonical `google/fonts` copies are now variable fonts (`Nunito[wght].ttf`). opentype.js — which replicad uses for outlines — reads only a variable font's default instance, so a variable Nunito would come out Regular however bold it was asked to be. These are pre-instanced statics at 400 and 700, sourced from `fonts.gstatic.com`; the exact URLs are in `src/assets/fonts/README.md`.
+- **Emitted as assets, not inlined:** imported with `?url` and fetched at worker start-up, the same arrangement as the OpenCascade `.wasm`. Inlining them as base64 would have added about 900 kB to the worker's JavaScript for the engine to parse on every load. Nothing is fetched from a font service, and the app still works offline.
+- **Cost:** 682 kB of fonts, 556 kB of it Noto Sans's full Latin/Greek/Cyrillic coverage. Noise beside a 23 MB kernel, so not subset — subsetting would add a build step and a way for a character to silently vanish.
+- **Reversibility:** High. A font is one entry in `FONTS` plus the file; the loaders find it by name.
+
+## D33 — Parameters have kinds (2026-10-28)
+- **What:** `ParamSpec` is a union discriminated on `kind`: `number` as before, plus `text` and `choice`. `ParamValues` widens to `number | string`. The form, the file validator and the builders all narrow the same way.
+- **Why a discriminated union:** adding a fourth kind becomes a compiler error everywhere it has not been handled, rather than a silent fall-through to the numeric path. That matters most in `designFile.ts`, where missing a kind would mean accepting a value nobody checked.
+- **Why `choice` as well as `text`:** the font is one of two known values. Expressing it as free text would make the dropdown a UI convention rather than a rule, and leave the file validator with nothing to check against.
+- **The cost, and where it is paid:** six of the seven shapes have only numeric parameters and want to destructure them as numbers. One helper, `numericShape`, carries a single cast so they still can. It is sound because nothing calls `build` with values that have not already been validated against that entry's own `params` — but it is a cast, and it is the only one in the library.
+- **Rejected:** a numeric-only `ParamValues` with text smuggled through a side channel, which would have put the Text shape's most important parameter outside the one mechanism that validates, serialises and renders everything else.
+- **Reversibility:** Medium. The union is easy to extend and awkward to remove.
+
+## D34 — Letter height means cap height, measured off the drawn H (2026-10-28)
+- **What:** The `letterHeight` parameter is the height of a capital letter in millimetres. It is converted to an em size by measuring the top of the font's own `H` glyph, not by trusting the font's declared `OS/2.sCapHeight`.
+- **Why not em size:** that is what opentype's `fontSize` actually is, and it is taller than any letter and differs between faces — 10 pt of Noto Sans and 10 pt of Nunito do not measure the same. Nobody designing a part wants a dimension that only means something relative to an invisible square.
+- **Why the drawn H and not the declared value:** the two disagree. Nunito Bold declares a cap height of 705 units and draws its H to 713. The drawn one is what ends up on the bed and what callipers will find.
+- **Watch:** a font may round the foot of its H slightly below the baseline — Nunito does, by 8 units in 1000 — so the overall ink box can measure about 1% over the cap height. The tests derive that overshoot from the font's metrics and assert the exact figure for both faces, rather than allowing a tolerance wide enough to hide it.
+- **Reversibility:** High. One function, `emSizeForCapHeight`.
+
+## D35 — Text is centred on its ink and extruded from its own base (2026-10-28)
+- **What:** The glyph outlines are centred on the origin by their bounding box, in X and Y, then extruded up from the XY plane — so like every other shape, Text sits on z = 0 and is centred on its position.
+- **Why the ink box and not the baseline:** placing text on a face is a visual act. Centring on the baseline would make "AK" and "ak" sit at different heights for the same position, which is not what "centred" means to anyone placing a label.
+- **Why opentype's box and not replicad's:** OpenCascade's 2D bounding box is generous around a Bézier — measured 0.03 mm wide on "AK + 2 = ?" in Nunito, which would push the text half that far off centre. opentype solves the curve extrema instead, and agrees with the extruded solid to about 1e-4 mm.
+- **Consequence:** a string with a descender is centred including the descender, so "?" shifts the block slightly against a string without one. That is the ink being centred, which is the intent.
+- **Nothing special for engraving:** the geometry is the same either way. Add raises the letters, Cut sinks them. D21's re-seating then puts the finished part back on the bed, so cutting into a top face does not lift anything.
+
+## D36 — Text declares no volume formula (2026-10-28)
+- **What:** `ShapeDef.volumeMm3` becomes `((v) => number) | null`, and Text is the one entry that sets it to `null`.
+- **Why:** D18 has each entry carry its own specification, and the generic test compares the kernel's measured volume against it. A string of glyph outlines has no closed-form area, so any formula here would have to be derived from the same outlines the kernel uses — a tautology dressed as a check.
+- **Why `null` rather than an optional field:** omitting a formula should be a decision, not an oversight. A deliberate `null` reads as one, and a separate test asserts that `text` is the *only* shape allowed to do it, so a formula cannot go missing elsewhere without failing.
+- **What replaces it:** Text is pinned down by properties instead — raised lettering increases a plate's volume by exactly the lettering's own volume, engraving removes exactly the fraction that was inside, more characters are wider, every promised character produces material. Its bounding box still has a formula, and it is a real cross-check: expected from opentype's curve arithmetic, measured from OpenCascade's extrusion, two independent routes.
+
+## D37 — The design format stays at version 1 (2026-10-28)
+- **What:** Adding the Text shape does not bump `DESIGN_VERSION`.
+- **Why:** D28's rule is to bump when a change would make an older file *wrong* rather than merely incomplete. Nothing about an existing field changes meaning: every version-1 file written before this bite still validates and still builds the identical part. `params` can now hold a string as well as a number, but only for a shape that did not exist before, so no older file can be read differently.
+- **The other direction is safe too:** a file written now, containing a text item, fed to a build from before this bite is refused by the unknown-shape check — `unknown shape "text". This app knows: box, cylinder…` — which is exactly the clear refusal D28 wanted, rather than a part that is subtly not what was drawn.
+- **Watch:** this reasoning only holds while new shapes are additive. Changing what `letterHeight` means, or what a font id refers to, would need the bump.
+
+## D38 — The kernel refuses characters the font cannot draw (2026-10-28)
+- **What:** Before any text is drawn, every character is looked up in the chosen font's character map. A character with no glyph is an error naming it, its code point, its position in the string, and what would otherwise have happened.
+- **Why this is not cosmetic:** opentype does not fail on a character it lacks — it substitutes `.notdef`, which in both bundled fonts is a filled rectangle. So the silent outcome is not a missing letter but a printed block, and the first place you would notice is the bed.
+- **Why the check is in the kernel and not the page:** it consults the real font, and only the worker has one. A hard-coded list of allowed characters in the page would be a duplicate of the truth, and a wrong one — both fonts carry `é` and `€`, which such a list would reject. The consequence is accepted deliberately: a file holding an undrawable character loads cleanly and then fails to build, with a clear message, because loading it is the only way to get it in front of someone who can fix it.
+- **Also refused here:** an empty or all-space string, and anything past 80 characters. `drawText` on empty text produces an inverted bounding box and then throws with `undefined` as its message, which is no use to anyone.
+- **Why replicad's own fallback is bypassed:** `textBlueprints` warns to the console and silently uses whichever font was registered first when a family is missing — the right letters in the wrong typeface. `loadedFont` turns that into a failure.
+
+## D39 — Printability warnings advise; they never block (2026-10-28)
+- **What:** A numeric parameter may declare `warnBelow`. Text warns under 5 mm of letter height and under 0.6 mm of depth. The form shows the message in amber, leaves the field valid, and nothing stops building or exporting.
+- **Why not a limit:** small text does print, just not always legibly, and which side of that line a part falls on depends on the nozzle, the material and what the text is for. Refusing it would be us deciding; saying so is the user deciding.
+- **Why it lives in the spec:** the warning has to cross `postMessage` to reach the form, like every other rule, so it is declarative data rather than a function — the same constraint D19 put on `lessThan`.
+- **Watch:** a threshold the default already trips would fire on every new item, which is how a warning stops being read. A test asserts every default sits at or above its own warning.
+
+## D40 — Node types are scoped to the tests (2026-10-28)
+- **What:** `tsconfig.json` keeps `types: ["vite/client"]` and excludes the test files; `tsconfig.test.json` extends it, adds `node`, and includes everything. `npm run build` runs both.
+- **Why:** the tests need `node:fs` — they load the bundled fonts off disk, because Node has no server to fetch a Vite-emitted asset URL from. Putting `node` in the one shared config would also put `process` and `Buffer` in scope for application code that runs in a tab, where reaching for them would type-check and then fail only once the page was open. Verified by adding `process.env` to `src/mesh.ts` and watching the app pass reject it.
+- **Known gap:** `exclude` filters the initial file set, not module resolution, so an explicit `import … from "node:fs"` inside application code would still type-check. That is a far more deliberate act than a bare global, and closing it would cost more config than it is worth.
+- **Reversibility:** High. Two small files and one line of `package.json`.

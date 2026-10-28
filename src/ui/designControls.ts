@@ -8,7 +8,13 @@
  */
 import { OPERATIONS, TRANSFORM_PARAMS, defaultDesign, defaultParams, newItem } from "../design";
 import type { Design, DesignItem, Operation } from "../design";
-import type { ParamSpec, ParamValues, ShapeCatalogEntry } from "../shapes/shapeLibrary";
+import type {
+  NumberParamSpec,
+  ParamSpec,
+  ParamValue,
+  ParamValues,
+  ShapeCatalogEntry,
+} from "../shapes/shapeLibrary";
 
 /** How long to wait after the last keystroke before rebuilding. */
 const DEBOUNCE_MS = 350;
@@ -25,21 +31,49 @@ export interface DesignControlsOptions {
 
 interface Field {
   spec: ParamSpec;
-  input: HTMLInputElement;
+  /** A number box, a text box or a dropdown, depending on the spec's kind. */
+  control: HTMLInputElement | HTMLSelectElement;
   error: HTMLElement;
+  /** Advice about printing. Never blocks anything — see `warningFor`. */
+  warning: HTMLElement;
+}
+
+/** Narrow a field to the numeric case, for rules that only numbers have. */
+function asNumber(field: Field): (Field & { spec: NumberParamSpec }) | null {
+  return field.spec.kind === "number" ? { ...field, spec: field.spec } : null;
+}
+
+/** What a field currently holds, in the type its spec calls for. */
+function valueOf({ spec, control }: Field): ParamValue {
+  return spec.kind === "number" ? Number(control.value) : control.value;
 }
 
 /**
- * Check one field against its own limits. Cross-field rules are handled
+ * Check one field against its own spec. Cross-field rules are handled
  * separately, since they need every value at once.
  */
-function checkOwn(spec: ParamSpec, input: HTMLInputElement): string | null {
+function checkOwn(spec: ParamSpec, control: HTMLInputElement | HTMLSelectElement): string | null {
+  if (spec.kind === "choice") {
+    // A dropdown cannot really be wrong, but a design loaded from a file could
+    // name a font this build does not have, and silently showing the first
+    // option would misrepresent what is about to be built.
+    return spec.options.some((option) => option.value === control.value)
+      ? null
+      : `Unknown ${spec.label.toLowerCase()} "${control.value}"`;
+  }
+
+  if (spec.kind === "text") {
+    if (control.value.trim() === "") return "Required";
+    if (control.value.length > spec.maxLength) return `At most ${spec.maxLength} characters`;
+    return null;
+  }
+
   // A number input blanks its value when the text cannot be parsed, so "abc"
   // and "" look identical from `value` alone. badInput tells them apart, which
   // is the difference between "Must be a number" and "Required".
-  if (input.validity.badInput) return "Must be a number";
+  if (control instanceof HTMLInputElement && control.validity.badInput) return "Must be a number";
 
-  const raw = input.value;
+  const raw = control.value;
   if (raw.trim() === "") return "Required";
   // Number(" ") is 0, hence the blank check above.
   const value = Number(raw);
@@ -53,6 +87,19 @@ function checkOwn(spec: ParamSpec, input: HTMLInputElement): string | null {
 }
 
 /**
+ * Printability advice for a value that is perfectly valid.
+ *
+ * Kept apart from `checkOwn` on purpose: this never makes a field invalid, so
+ * it can never stop a build or an export. Small text does print — just not
+ * always legibly — and which side of that line a part falls on is the user's
+ * call, not ours.
+ */
+function warningFor(spec: ParamSpec, value: ParamValue): string | null {
+  if (spec.kind !== "number" || !spec.warnBelow) return null;
+  return typeof value === "number" && value < spec.warnBelow.value ? spec.warnBelow.message : null;
+}
+
+/**
  * Validate a group of fields together, paint the messages, and return the
  * values if they all pass.
  */
@@ -60,37 +107,54 @@ function validateGroup(fields: Field[]): ParamValues | null {
   const values: ParamValues = {};
   let ok = true;
 
-  // Own-limit pass first, so cross-field rules only see usable numbers.
-  for (const { spec, input, error } of fields) {
-    const message = checkOwn(spec, input);
+  // Own-spec pass first, so cross-field rules only see usable numbers.
+  for (const field of fields) {
+    const { spec, control, error, warning } = field;
+    const message = checkOwn(spec, control);
     error.textContent = message ?? "";
-    input.classList.toggle("invalid", message !== null);
-    if (message) ok = false;
-    else values[spec.key] = Number(input.value);
+    control.classList.toggle("invalid", message !== null);
+    if (message) {
+      // The error is the more urgent thing to read, and advice about a value
+      // the user is still typing is noise.
+      warning.textContent = "";
+      ok = false;
+      continue;
+    }
+    const value = valueOf(field);
+    values[spec.key] = value;
+    warning.textContent = warningFor(spec, value) ?? "";
   }
   if (!ok) return null;
 
-  for (const { spec, input, error } of fields) {
+  for (const field of fields) {
+    const numeric = asNumber(field);
+    if (!numeric) continue;
+    const { spec, control, error } = numeric;
+
     const violated = (spec.lessThan ?? [])
       .map((key) => fields.find((f) => f.spec.key === key))
       .filter((f): f is Field => f !== undefined && values[spec.key] >= values[f.spec.key])
       // Name the tightest bound; fixing that one fixes the rest.
-      .sort((a, b) => values[a.spec.key] - values[b.spec.key]);
+      .sort((a, b) => Number(values[a.spec.key]) - Number(values[b.spec.key]));
 
     const tightest = violated[0];
     if (!tightest) continue;
     error.textContent = `Must be less than ${tightest.spec.label.toLowerCase()} (${values[tightest.spec.key]} mm)`;
-    input.classList.add("invalid");
+    control.classList.add("invalid");
     ok = false;
   }
   return ok ? values : null;
 }
 
-function labelled(text: string, control: HTMLElement, error?: HTMLElement): HTMLLabelElement {
+function labelled(
+  text: string,
+  control: HTMLElement,
+  ...messages: HTMLElement[]
+): HTMLLabelElement {
   const label = document.createElement("label");
   label.className = "field";
   label.append(Object.assign(document.createElement("span"), { textContent: text }), control);
-  if (error) label.append(error);
+  label.append(...messages);
   return label;
 }
 
@@ -249,22 +313,55 @@ export function createDesignControls(
     return shape;
   }
 
+  /** The control a spec asks for, filled in with the item's current value. */
+  function makeControl(spec: ParamSpec, value: ParamValue): HTMLInputElement | HTMLSelectElement {
+    if (spec.kind === "choice") {
+      const select = document.createElement("select");
+      for (const option of spec.options) select.append(new Option(option.label, option.value));
+      // Assigned after the options exist, or the browser drops the value.
+      select.value = String(value);
+      // A dropdown has no intermediate state worth debouncing.
+      select.addEventListener("change", () => commit(true));
+      return select;
+    }
+
+    const input = document.createElement("input");
+    if (spec.kind === "text") {
+      input.type = "text";
+      // Stops the overlong case at the keyboard as well as in validation.
+      input.maxLength = spec.maxLength;
+      input.autocomplete = "off";
+      input.spellcheck = false;
+    } else {
+      input.type = "number";
+      input.step = "any";
+    }
+    input.value = String(value);
+    input.addEventListener("input", () => commit(false));
+    return input;
+  }
+
   function makeField(
     spec: ParamSpec,
-    value: number,
+    value: ParamValue,
     shortLabel?: string,
   ): Field & { element: HTMLElement } {
-    const input = document.createElement("input");
-    input.type = "number";
-    input.step = "any";
-    input.value = String(value);
-    input.id = `param-${spec.key}`;
-    input.title = spec.label;
-    input.addEventListener("input", () => commit(false));
+    const control = makeControl(spec, value);
+    control.id = `param-${spec.key}`;
+    control.title = spec.label;
 
     const error = document.createElement("span");
     error.className = "field-error";
-    return { spec, input, error, element: labelled(shortLabel ?? spec.label, input, error) };
+    const warning = document.createElement("span");
+    warning.className = "field-warning";
+
+    return {
+      spec,
+      control,
+      error,
+      warning,
+      element: labelled(shortLabel ?? spec.label, control, error, warning),
+    };
   }
 
   /** Put short fields side by side rather than stacking them. */
@@ -335,12 +432,30 @@ export function createDesignControls(
     const axes = placement.filter((f) => isAxis(f.spec.key)).map((f) => f.element);
     const rest = placement.filter((f) => !isAxis(f.spec.key)).map((f) => f.element);
     transformEl.replaceChildren(placementHeading, row("cols-3", axes), ...rest);
+
+    // Paint the messages for the fields just built, so selecting an item shows
+    // its printability warnings straight away rather than on the next keystroke.
+    validateGroup(paramFields);
+    validateGroup(transformFields);
+  }
+
+  /**
+   * The placement, as the four numbers a design item needs.
+   *
+   * TRANSFORM_PARAMS is declared as numbers only, so each value is a number by
+   * construction once `validateGroup` has accepted it.
+   */
+  function readPlacement(): { x: number; y: number; z: number; rotationZ: number } | null {
+    const values = validateGroup(transformFields);
+    if (!values) return null;
+    const num = (key: string): number => values[key] as number;
+    return { x: num("x"), y: num("y"), z: num("z"), rotationZ: num("rotationZ") };
   }
 
   /** Read the form into the selected item, and schedule a rebuild. */
   function commit(immediate: boolean): void {
     const params = validateGroup(paramFields);
-    const placement = validateGroup(transformFields);
+    const placement = readPlacement();
     const valid = params !== null && placement !== null;
 
     if (valid !== lastValid) {

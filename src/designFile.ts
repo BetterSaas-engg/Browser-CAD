@@ -11,7 +11,15 @@
  */
 import { DESIGN_VERSION, TRANSFORM_PARAMS } from "./design";
 import type { Design, DesignItem, Operation, Vec3 } from "./design";
-import type { ParamSpec, ParamValues, ShapeCatalogEntry } from "./shapes/shapeLibrary";
+import type {
+  ChoiceParamSpec,
+  NumberParamSpec,
+  ParamSpec,
+  ParamValue,
+  ParamValues,
+  ShapeCatalogEntry,
+  TextParamSpec,
+} from "./shapes/shapeLibrary";
 
 /** Where the autosave lives. Namespaced so it cannot collide on localhost. */
 export const AUTOSAVE_KEY = "browser-cad:design:v1";
@@ -38,7 +46,7 @@ function unknownKeys(value: Record<string, unknown>, allowed: string[]): string[
   return Object.keys(value).filter((key) => !allowed.includes(key));
 }
 
-function checkNumber(value: unknown, spec: ParamSpec, where: string): string | null {
+function checkNumber(value: unknown, spec: NumberParamSpec, where: string): string | null {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return `${where}: ${spec.label} must be a number, but it is ${JSON.stringify(value)}.`;
   }
@@ -49,7 +57,48 @@ function checkNumber(value: unknown, spec: ParamSpec, where: string): string | n
   return null;
 }
 
-const axisSpec = (key: "x" | "y" | "z"): ParamSpec => {
+function checkText(value: unknown, spec: TextParamSpec, where: string): string | null {
+  if (typeof value !== "string") {
+    return `${where}: ${spec.label} must be a string, but it is ${JSON.stringify(value)}.`;
+  }
+  // Blank is refused rather than quietly accepted. There is no geometry in an
+  // empty string, and substituting something would be inventing content the
+  // file did not ask for (D29).
+  if (value.trim() === "") {
+    return `${where}: ${spec.label} is blank, so there is nothing to build.`;
+  }
+  if (value.length > spec.maxLength) {
+    return `${where}: ${spec.label} is ${value.length} characters, over the ${spec.maxLength} allowed.`;
+  }
+  // Deliberately not checked here: whether the chosen font can draw every
+  // character. Only the kernel has the font — see fonts.ts, assertFontCanDraw.
+  return null;
+}
+
+function checkChoice(value: unknown, spec: ChoiceParamSpec, where: string): string | null {
+  if (typeof value !== "string") {
+    return `${where}: ${spec.label} must be a string, but it is ${JSON.stringify(value)}.`;
+  }
+  if (!spec.options.some((option) => option.value === value)) {
+    const known = spec.options.map((option) => option.value).join(", ");
+    return `${where}: unknown ${spec.label.toLowerCase()} ${JSON.stringify(value)}. This app has: ${known}.`;
+  }
+  return null;
+}
+
+/** Check one value against its own spec, whatever kind of parameter it is. */
+function checkParam(value: unknown, spec: ParamSpec, where: string): string | null {
+  switch (spec.kind) {
+    case "number":
+      return checkNumber(value, spec, where);
+    case "text":
+      return checkText(value, spec, where);
+    case "choice":
+      return checkChoice(value, spec, where);
+  }
+}
+
+const axisSpec = (key: "x" | "y" | "z"): NumberParamSpec => {
   const spec = TRANSFORM_PARAMS.find((p) => p.key === key);
   if (!spec) throw new Error(`TRANSFORM_PARAMS is missing "${key}"`);
   return spec;
@@ -88,9 +137,9 @@ function readItem(
     if (!(spec.key in raw.params)) {
       return { problem: `${where}: ${shape.label} is missing ${spec.label}.` };
     }
-    const problem = checkNumber(raw.params[spec.key], spec, where);
+    const problem = checkParam(raw.params[spec.key], spec, where);
     if (problem) return { problem };
-    params[spec.key] = raw.params[spec.key] as number;
+    params[spec.key] = raw.params[spec.key] as ParamValue;
   }
 
   // --- placement ---
@@ -183,17 +232,32 @@ export function parseDesign(text: string, catalog: ShapeCatalogEntry[]): LoadRes
   return validateDesign(value, catalog);
 }
 
+export type SaveResult = { ok: true } | { ok: false; problem: string };
+
 /**
- * Write the autosave slot.
+ * Write the autosave slot, and say whether it worked.
  *
- * Swallows storage failures on purpose: a full quota or a private window should
- * cost you the convenience of autosave, not the ability to keep modelling.
+ * A failure is not fatal — a full quota or a private window costs you the
+ * convenience of autosave, not the ability to keep modelling — so this returns
+ * rather than throwing. But it does not swallow it either: silently stopping
+ * saving is how an afternoon's work disappears on the next refresh, and the one
+ * moment the user could have acted on it is while they are still in the tab.
+ * The caller shows the notice (D31, revising D30).
  */
-export function autosave(design: Design, store: DesignStore): void {
+export function autosave(design: Design, store: DesignStore): SaveResult {
   try {
     store.setItem(AUTOSAVE_KEY, serialiseDesign(design));
-  } catch {
-    /* no autosave this time; the design in front of the user is unaffected */
+    return { ok: true };
+  } catch (error) {
+    // Name the usual suspect. Browsers raise QuotaExceededError both when
+    // storage is genuinely full and when a private window refuses to persist
+    // at all, which are the two cases worth telling apart in the message.
+    const name = error instanceof Error ? error.name : "";
+    const cause =
+      name === "QuotaExceededError"
+        ? "browser storage is full, or this window does not allow it"
+        : `the browser refused (${name || error})`;
+    return { ok: false, problem: `Your work is not being saved automatically: ${cause}.` };
   }
 }
 

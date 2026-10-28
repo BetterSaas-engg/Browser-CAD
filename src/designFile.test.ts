@@ -39,9 +39,29 @@ const plate: Design = {
   ],
 };
 
+/** A design whose second item is engraved text, for the mixed-parameter cases. */
+const engraved: Design = {
+  version: DESIGN_VERSION,
+  items: [
+    newItem("box", { width: 60, depth: 20, height: 5 }),
+    {
+      ...newItem("text", { text: "AK + 2 = ?", letterHeight: 6, depth: 1.5, font: "rounded" }, "cut"),
+      position: { x: 0, y: 0, z: 4 },
+      rotationZ: 0,
+    },
+  ],
+};
+
 /** Deep-clone and mutate a valid design, so each case differs in one way only. */
 function broken(mutate: (d: any) => void): unknown {
   const copy = structuredClone(plate) as any;
+  mutate(copy);
+  return copy;
+}
+
+/** The same, for the text design, so text cases can be broken one field at a time. */
+function brokenText(mutate: (d: any) => void): unknown {
+  const copy = structuredClone(engraved) as any;
   mutate(copy);
   return copy;
 }
@@ -77,6 +97,37 @@ describe("round trip", () => {
     const result = validateDesign(defaultDesign(CATALOG), CATALOG);
     expect(result.ok).toBe(true);
   });
+
+  it("round-trips a design containing text", () => {
+    // The interesting case: `params` now holds a string, a couple of numbers
+    // and a font id side by side, and all four have to survive JSON intact.
+    const result = parseDesign(serialiseDesign(engraved), CATALOG);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.design).toEqual(engraved);
+    expect(result.design.items[1].params.text).toBe("AK + 2 = ?");
+    expect(result.design.items[1].params.font).toBe("rounded");
+  });
+
+  it("keeps punctuation and spacing in text exactly as typed", () => {
+    // JSON escaping, and our own serialiser, must not touch the one field the
+    // user can put arbitrary characters into.
+    const fussy = structuredClone(engraved);
+    fussy.items[1].params.text = '  a "quoted" \\ back? ';
+    const result = parseDesign(serialiseDesign(fussy), CATALOG);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.design.items[1].params.text).toBe('  a "quoted" \\ back? ');
+  });
+
+  it("round-trips text through the autosave slot too", () => {
+    const store = fakeStore();
+    autosave(engraved, store);
+    const result = restoreAutosave(CATALOG, store);
+    expect(result.status).toBe("restored");
+    if (result.status !== "restored") return;
+    expect(result.design).toEqual(engraved);
+  });
 });
 
 describe("rejecting invalid designs", () => {
@@ -106,6 +157,36 @@ describe("rejecting invalid designs", () => {
     ["an unexpected top-level field", broken((d) => (d.name = "my part")), /Unexpected fields at the top level: name/i],
     ["an unexpected item field", broken((d) => (d.items[0].colour = "red")), /Item 1 has unexpected fields: colour/i],
     ["an item that is not an object", broken((d) => (d.items[1] = 7)), /Item 2 is not an object/i],
+
+    // --- the parameter kinds text brought in ---
+    ["numeric text", brokenText((d) => (d.items[1].params.text = 42)), /Item 2.*Text must be a string/i],
+    ["blank text", brokenText((d) => (d.items[1].params.text = "   ")), /Item 2.*Text is blank/i],
+    ["empty text", brokenText((d) => (d.items[1].params.text = "")), /Item 2.*Text is blank/i],
+    [
+      "text past the length limit",
+      brokenText((d) => (d.items[1].params.text = "A".repeat(81))),
+      /Item 2.*81 characters, over the 80 allowed/i,
+    ],
+    [
+      "an unknown font",
+      brokenText((d) => (d.items[1].params.font = "papyrus")),
+      /Item 2.*unknown font "papyrus".*sans, rounded/i,
+    ],
+    [
+      "a numeric font",
+      brokenText((d) => (d.items[1].params.font = 1)),
+      /Item 2.*Font must be a string/i,
+    ],
+    [
+      "a missing text parameter",
+      brokenText((d) => delete d.items[1].params.text),
+      /Item 2.*Text is missing Text/i,
+    ],
+    [
+      "a letter height outside the limits",
+      brokenText((d) => (d.items[1].params.letterHeight = 0)),
+      /Item 2.*outside the allowed/i,
+    ],
   ];
 
   it.each(CASES)("rejects %s", (_label, value, expected) => {
@@ -166,13 +247,45 @@ describe("autosave", () => {
     expect(store.value).toBe("{ corrupted");
   });
 
-  it("does not throw when the store refuses to write", () => {
+  it("reports a refused write instead of throwing or swallowing it", () => {
+    // Swallowing this was the bug: autosave would stop working and say
+    // nothing, and the loss only showed up on the next refresh (D31).
     const full: DesignStore = {
       getItem: () => null,
-      setItem: () => { throw new Error("QuotaExceededError"); },
+      setItem: () => {
+        const error = new Error("exceeded the quota");
+        error.name = "QuotaExceededError";
+        throw error;
+      },
       removeItem: () => {},
     };
-    expect(() => autosave(plate, full)).not.toThrow();
+
+    let result: ReturnType<typeof autosave> | undefined;
+    expect(() => (result = autosave(plate, full))).not.toThrow();
+    expect(result?.ok).toBe(false);
+    if (result?.ok !== false) return;
+    expect(result.problem).toMatch(/not being saved automatically/i);
+    expect(result.problem).toMatch(/storage is full|private/i);
+  });
+
+  it("names a failure it does not recognise rather than guessing", () => {
+    const odd: DesignStore = {
+      getItem: () => null,
+      setItem: () => {
+        const error = new Error("nope");
+        error.name = "SecurityError";
+        throw error;
+      },
+      removeItem: () => {},
+    };
+    const result = autosave(plate, odd);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.problem).toContain("SecurityError");
+  });
+
+  it("reports success, so the caller can tell when saving recovers", () => {
+    expect(autosave(plate, fakeStore()).ok).toBe(true);
   });
 
   it("does not throw when the store refuses to read", () => {

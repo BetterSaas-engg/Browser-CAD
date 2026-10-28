@@ -1,0 +1,21 @@
+/*
+ * Type-checking for the tests.
+ *
+ * Identical to tsconfig.json except that Node's types are in scope, because
+ * the tests load the bundled fonts off disk — Node has no server to fetch a
+ * Vite-emitted asset URL from. Keeping that in its own config is what stops
+ * `process` and `Buffer` from quietly type-checking inside application code,
+ * where they would only fail once the page was open.
+ *
+ * `npm run build` runs both configs. Vitest does not read either: it strips
+ * types rather than checking them.
+ */
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  /* Everything, including what tsconfig.json leaves out. */
+  "include": ["src"],
+  "exclude": []
+}

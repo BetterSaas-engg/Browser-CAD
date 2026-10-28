@@ -1,11 +1,15 @@
 import { beforeAll, describe, expect, it } from "vitest";
-import { setOC } from "replicad";
+import { measureVolume, setOC } from "replicad";
 import initOpenCascade from "replicad-opencascadejs";
 import { SHAPES, defaultsFor } from "../shapes/shapeLibrary";
+import { loadBundledFontsFromDisk } from "../shapes/bundledFonts.node";
 import { STL_EXPORT_OPTIONS, shapeStl } from "./stl";
 
+// The Text shape is in SHAPES like any other, so the fonts have to be in place
+// before anything here builds.
 beforeAll(async () => {
   setOC(await initOpenCascade());
+  await loadBundledFontsFromDisk();
 }, 120_000);
 
 const HEADER_BYTES = 80;
@@ -108,7 +112,10 @@ describe.each(SHAPES.map((shape) => [shape.id, shape] as const))("%s", (_id, sha
   });
 
   it("matches the exact volume within 0.1%", () => {
-    const exact = shape.volumeMm3(params);
+    // Text has no closed-form volume, so it is compared against the kernel's
+    // own measurement instead. This test is about what the exporter did to the
+    // geometry on the way out, not about the formula.
+    const exact = shape.volumeMm3 ? shape.volumeMm3(params) : measureVolume(shape.build(params));
     const mesh = meshVolumeMm3(parsed);
 
     // Facet corners sit on the true surface, so curves are approximated by

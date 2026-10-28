@@ -3,6 +3,10 @@
     "target": "es2023",
     "module": "esnext",
     "lib": ["ES2023", "DOM"],
+    /* Browser types only. Node's globals are deliberately absent: this code
+       runs in a tab, and `process` or `Buffer` reaching for them by mistake
+       should fail here rather than at runtime. The tests need Node, and get it
+       from tsconfig.test.json. */
     "types": ["vite/client"],
     "allowArbitraryExtensions": true,
     "skipLibCheck": true,
@@ -21,5 +25,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  /* The tests, and the one module that exists only for them. Both are checked
+     by tsconfig.test.json instead, which is the only place Node types live. */
+  "exclude": ["src/**/*.test.ts", "src/shapes/bundledFonts.node.ts"]
 }

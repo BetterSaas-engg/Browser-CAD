@@ -9,7 +9,7 @@
  *
  * Coordinates are millimetres, Z up, matching the kernel.
  */
-import type { ParamSpec, ParamValues } from "./shapes/shapeLibrary";
+import type { NumberParamSpec, ParamSpec, ParamValues } from "./shapes/shapeLibrary";
 
 export type Operation = "add" | "cut";
 
@@ -57,12 +57,15 @@ export const POSITION_LIMIT_MM = 256;
 /**
  * The placement fields, described the same way the shape library describes its
  * parameters, so the form and its validation treat them identically.
+ *
+ * Typed as numbers specifically, not as the general `ParamSpec`: where an item
+ * sits is always four numbers, whatever kinds of parameter its shape has.
  */
-export const TRANSFORM_PARAMS: ParamSpec[] = [
-  { key: "x", label: "Position X", default: 0, min: -POSITION_LIMIT_MM, max: POSITION_LIMIT_MM },
-  { key: "y", label: "Position Y", default: 0, min: -POSITION_LIMIT_MM, max: POSITION_LIMIT_MM },
-  { key: "z", label: "Position Z", default: 0, min: -POSITION_LIMIT_MM, max: POSITION_LIMIT_MM },
-  { key: "rotationZ", label: "Rotation about Z", default: 0, min: -360, max: 360, unit: "°" },
+export const TRANSFORM_PARAMS: NumberParamSpec[] = [
+  { kind: "number", key: "x", label: "Position X", default: 0, min: -POSITION_LIMIT_MM, max: POSITION_LIMIT_MM },
+  { kind: "number", key: "y", label: "Position Y", default: 0, min: -POSITION_LIMIT_MM, max: POSITION_LIMIT_MM },
+  { kind: "number", key: "z", label: "Position Z", default: 0, min: -POSITION_LIMIT_MM, max: POSITION_LIMIT_MM },
+  { kind: "number", key: "rotationZ", label: "Rotation about Z", default: 0, min: -360, max: 360, unit: "°" },
 ];
 
 export const OPERATIONS: { value: Operation; label: string }[] = [

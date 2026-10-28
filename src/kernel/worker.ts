@@ -12,6 +12,7 @@ import wasmUrl from "replicad-opencascadejs/wasm?url";
 import { buildDesign } from "./build";
 import { designStl } from "./stl";
 import { catalog } from "../shapes/shapeLibrary";
+import { loadBundledFonts } from "../shapes/bundledFonts";
 import { meshBuffers } from "../mesh";
 import type { ShapeCatalogEntry } from "../shapes/shapeLibrary";
 import type { Design } from "../design";
@@ -53,11 +54,15 @@ function fail(context: string, error: unknown): void {
 
 // Start loading the 23 MB WASM build immediately; the page is already showing
 // "Loading kernel..." by the time this worker spins up.
-const kernelReady: Promise<void> = initOpenCascade({
-  locateFile: () => wasmUrl,
-}).then((oc) => {
-  setOC(oc);
-});
+//
+// The fonts the Text shape needs load alongside it — they are small and
+// independent, so there is nothing to gain by waiting. Both have to be in place
+// before `ready` goes out, or the first build of a restored design containing
+// text would race a font that is still arriving.
+const kernelReady: Promise<void> = Promise.all([
+  initOpenCascade({ locateFile: () => wasmUrl }).then((oc) => setOC(oc)),
+  loadBundledFonts(),
+]).then(() => undefined);
 
 kernelReady.then(
   () => ctx.postMessage({ type: "ready", catalog: catalog() }),

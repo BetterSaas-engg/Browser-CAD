@@ -243,7 +243,8 @@
         outline: 2px solid #5c9ded;
         outline-offset: -1px;
       }
-      .field input.invalid {
+      .field input.invalid,
+      .field select.invalid {
         border-color: #ff8a8a;
         background: #332326;
       }
@@ -255,6 +256,17 @@
         color: #ff8a8a;
       }
       .field-error:empty {
+        display: none;
+      }
+      /* Printability advice, not an error: amber rather than red, and the field
+         itself is left alone. Nothing here blocks a build or an export. */
+      .field-warning {
+        display: block;
+        font-size: 0.68rem;
+        line-height: 1.3;
+        color: #e8b06a;
+      }
+      .field-warning:empty {
         display: none;
       }
 
