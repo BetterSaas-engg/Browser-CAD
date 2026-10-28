@@ -10,11 +10,14 @@ import { OPERATIONS, TRANSFORM_PARAMS, defaultDesign, defaultParams, newItem } f
 import type { Design, DesignItem, Operation } from "../design";
 import type {
   NumberParamSpec,
+  OutlineParamSpec,
   ParamSpec,
   ParamValue,
   ParamValues,
   ShapeCatalogEntry,
 } from "../shapes/shapeLibrary";
+import { importSvgOutline } from "../svg/importSvg";
+import type { Outline } from "../svg/outline";
 
 /** How long to wait after the last keystroke before rebuilding. */
 const DEBOUNCE_MS = 350;
@@ -29,13 +32,24 @@ export interface DesignControlsOptions {
   onValidityChange(valid: boolean): void;
 }
 
+/**
+ * One parameter's control, plus how to read it and what is wrong with it.
+ *
+ * `read` and `check` are closures rather than a switch over the spec's kind,
+ * because not every kind keeps its value in the DOM: an imported outline is an
+ * object held beside its control, and there is no `input.value` for it.
+ */
 interface Field {
   spec: ParamSpec;
-  /** A number box, a text box or a dropdown, depending on the spec's kind. */
-  control: HTMLInputElement | HTMLSelectElement;
+  /** Whatever the user interacts with; only used to flag it as invalid. */
+  control: HTMLElement;
   error: HTMLElement;
   /** Advice about printing. Never blocks anything — see `warningFor`. */
   warning: HTMLElement;
+  /** The value now. Only meaningful when `check` returns null. */
+  read(): ParamValue;
+  /** What is wrong with the control's contents, or null if nothing is. */
+  check(): string | null;
 }
 
 /** Narrow a field to the numeric case, for rules that only numbers have. */
@@ -43,37 +57,14 @@ function asNumber(field: Field): (Field & { spec: NumberParamSpec }) | null {
   return field.spec.kind === "number" ? { ...field, spec: field.spec } : null;
 }
 
-/** What a field currently holds, in the type its spec calls for. */
-function valueOf({ spec, control }: Field): ParamValue {
-  return spec.kind === "number" ? Number(control.value) : control.value;
-}
-
-/**
- * Check one field against its own spec. Cross-field rules are handled
- * separately, since they need every value at once.
- */
-function checkOwn(spec: ParamSpec, control: HTMLInputElement | HTMLSelectElement): string | null {
-  if (spec.kind === "choice") {
-    // A dropdown cannot really be wrong, but a design loaded from a file could
-    // name a font this build does not have, and silently showing the first
-    // option would misrepresent what is about to be built.
-    return spec.options.some((option) => option.value === control.value)
-      ? null
-      : `Unknown ${spec.label.toLowerCase()} "${control.value}"`;
-  }
-
-  if (spec.kind === "text") {
-    if (control.value.trim() === "") return "Required";
-    if (control.value.length > spec.maxLength) return `At most ${spec.maxLength} characters`;
-    return null;
-  }
-
+/** The own-limits check for a number box. */
+function checkNumberInput(spec: NumberParamSpec, input: HTMLInputElement): string | null {
   // A number input blanks its value when the text cannot be parsed, so "abc"
   // and "" look identical from `value` alone. badInput tells them apart, which
   // is the difference between "Must be a number" and "Required".
-  if (control instanceof HTMLInputElement && control.validity.badInput) return "Must be a number";
+  if (input.validity.badInput) return "Must be a number";
 
-  const raw = control.value;
+  const raw = input.value;
   if (raw.trim() === "") return "Required";
   // Number(" ") is 0, hence the blank check above.
   const value = Number(raw);
@@ -110,7 +101,7 @@ function validateGroup(fields: Field[]): ParamValues | null {
   // Own-spec pass first, so cross-field rules only see usable numbers.
   for (const field of fields) {
     const { spec, control, error, warning } = field;
-    const message = checkOwn(spec, control);
+    const message = field.check();
     error.textContent = message ?? "";
     control.classList.toggle("invalid", message !== null);
     if (message) {
@@ -120,7 +111,7 @@ function validateGroup(fields: Field[]): ParamValues | null {
       ok = false;
       continue;
     }
-    const value = valueOf(field);
+    const value = field.read();
     values[spec.key] = value;
     warning.textContent = warningFor(spec, value) ?? "";
   }
@@ -265,7 +256,18 @@ export function createDesignControls(
     const shape = shapeFor(shapePicker.value);
     const item = design.items[selected];
     item.shapeId = shape.id;
+    /*
+     * Parameters go back to the new shape's defaults rather than carrying over
+     * by name. The same key means different things on different shapes — a
+     * box's `depth` is how far it reaches in Y, a text or outline's `depth` is
+     * how thick it is in Z — so keeping the number would silently change what
+     * it meant.
+     */
     item.params = defaultParams(shape.params);
+    // The list shows each item's shape name, so it has to be repainted too.
+    // Without this the row still read "3. Box" for an item that had become an
+    // Outline, until some later edit happened to repaint the list.
+    renderList();
     renderEditor();
     commit(true);
   });
@@ -313,32 +315,93 @@ export function createDesignControls(
     return shape;
   }
 
-  /** The control a spec asks for, filled in with the item's current value. */
-  function makeControl(spec: ParamSpec, value: ParamValue): HTMLInputElement | HTMLSelectElement {
-    if (spec.kind === "choice") {
-      const select = document.createElement("select");
-      for (const option of spec.options) select.append(new Option(option.label, option.value));
-      // Assigned after the options exist, or the browser drops the value.
-      select.value = String(value);
-      // A dropdown has no intermediate state worth debouncing.
-      select.addEventListener("change", () => commit(true));
-      return select;
-    }
+  /**
+   * The control for an imported outline: a button that opens a file picker, and
+   * a line saying what is currently loaded.
+   *
+   * The outline itself lives in this closure, not in the DOM. Importing is the
+   * only way to change it, and importing is where every refusal happens — by
+   * the time a value reaches here it has already been parsed and normalised.
+   */
+  function makeOutlineControl(
+    spec: OutlineParamSpec,
+    initial: Outline,
+  ): { control: HTMLElement; read(): ParamValue; check(): string | null; describe(): void } {
+    let outline: Outline = structuredClone(initial);
 
-    const input = document.createElement("input");
-    if (spec.kind === "text") {
-      input.type = "text";
-      // Stops the overlong case at the keyboard as well as in validation.
-      input.maxLength = spec.maxLength;
-      input.autocomplete = "off";
-      input.spellcheck = false;
-    } else {
-      input.type = "number";
-      input.step = "any";
-    }
-    input.value = String(value);
-    input.addEventListener("input", () => commit(false));
-    return input;
+    const wrapper = document.createElement("div");
+    wrapper.className = "outline-control";
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "outline-import";
+    button.textContent = "Import SVG…";
+
+    const summary = document.createElement("span");
+    summary.className = "outline-summary";
+
+    const file = document.createElement("input");
+    file.type = "file";
+    file.accept = ".svg,image/svg+xml";
+    file.hidden = true;
+
+    const describe = (): void => {
+      const holes = outline.loops.filter((loop) => loop.hole).length;
+      const loops = outline.loops.length;
+      summary.textContent =
+        `${loops} loop${loops === 1 ? "" : "s"}` + (holes ? `, ${holes} of them holes` : "");
+    };
+
+    button.addEventListener("click", () => file.click());
+
+    file.addEventListener("change", async () => {
+      const chosen = file.files?.[0];
+      // Reset at once, or picking the same file twice fires no second change.
+      file.value = "";
+      if (!chosen) return;
+
+      let text: string;
+      try {
+        text = await chosen.text();
+      } catch (error) {
+        showMessage(`Could not read ${chosen.name}: ${error}`);
+        return;
+      }
+
+      try {
+        // Parsed here and nowhere else: what goes into the design is path data,
+        // never the file's markup (D41).
+        const imported = importSvgOutline(text);
+        outline = imported.outline;
+        describe();
+        clearMessage();
+        showMessage(`Imported ${chosen.name}.`);
+        commit(true);
+      } catch (error) {
+        // The importer's messages say what to do about it, so pass them
+        // straight through rather than wrapping them in something vaguer.
+        showMessage(
+          `${chosen.name} was not imported. ${error instanceof Error ? error.message : error}`,
+        );
+      }
+    });
+
+    wrapper.append(button, file, summary);
+    describe();
+
+    return {
+      control: wrapper,
+      read: () => outline,
+      check: () => {
+        if (outline.loops.length === 0) return "Import an SVG to get started";
+        const characters = outline.loops.reduce((total, loop) => total + loop.d.length, 0);
+        if (characters > spec.maxCharacters) {
+          return `Too detailed for a design (${characters.toLocaleString()} characters)`;
+        }
+        return null;
+      },
+      describe,
+    };
   }
 
   function makeField(
@@ -346,21 +409,78 @@ export function createDesignControls(
     value: ParamValue,
     shortLabel?: string,
   ): Field & { element: HTMLElement } {
-    const control = makeControl(spec, value);
-    control.id = `param-${spec.key}`;
-    control.title = spec.label;
-
     const error = document.createElement("span");
     error.className = "field-error";
     const warning = document.createElement("span");
     warning.className = "field-warning";
 
+    const field = ((): Pick<Field, "control" | "read" | "check"> => {
+      if (spec.kind === "outline") {
+        const outlineValue =
+          typeof value === "object" && value !== null ? (value as Outline) : spec.default;
+        return makeOutlineControl(spec, outlineValue);
+      }
+
+      if (spec.kind === "choice") {
+        const select = document.createElement("select");
+        for (const option of spec.options) select.append(new Option(option.label, option.value));
+        // Assigned after the options exist, or the browser drops the value.
+        select.value = String(value);
+        // A dropdown has no intermediate state worth debouncing.
+        select.addEventListener("change", () => commit(true));
+        return {
+          control: select,
+          read: () => select.value,
+          // A dropdown cannot really be wrong, but a design loaded from a file
+          // could name a font this build does not have, and silently showing
+          // the first option would misrepresent what is about to be built.
+          check: () =>
+            spec.options.some((option) => option.value === select.value)
+              ? null
+              : `Unknown ${spec.label.toLowerCase()} "${select.value}"`,
+        };
+      }
+
+      const input = document.createElement("input");
+      if (spec.kind === "text") {
+        input.type = "text";
+        // Stops the overlong case at the keyboard as well as in validation.
+        input.maxLength = spec.maxLength;
+        input.autocomplete = "off";
+        input.spellcheck = false;
+        input.value = String(value);
+        input.addEventListener("input", () => commit(false));
+        return {
+          control: input,
+          read: () => input.value,
+          check: () => {
+            if (input.value.trim() === "") return "Required";
+            if (input.value.length > spec.maxLength) return `At most ${spec.maxLength} characters`;
+            return null;
+          },
+        };
+      }
+
+      input.type = "number";
+      input.step = "any";
+      input.value = String(value);
+      input.addEventListener("input", () => commit(false));
+      return {
+        control: input,
+        read: () => Number(input.value),
+        check: () => checkNumberInput(spec, input),
+      };
+    })();
+
+    field.control.id = `param-${spec.key}`;
+    field.control.title = spec.label;
+
     return {
       spec,
-      control,
+      ...field,
       error,
       warning,
-      element: labelled(shortLabel ?? spec.label, control, error, warning),
+      element: labelled(shortLabel ?? spec.label, field.control, error, warning),
     };
   }
 

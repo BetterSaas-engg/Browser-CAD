@@ -30,3 +30,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Claude Code local permission overrides. settings.json is the shared
+# project allowlist and is committed; this one records one-off approvals
+# with local paths in them.
+.claude/settings.local.json

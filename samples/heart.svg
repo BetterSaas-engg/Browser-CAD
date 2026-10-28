@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A heart, drawn from scratch for browser-cad so there are no licence
+  questions about it. Public domain — do what you like with it.
+
+  One filled path, six cubic curves, symmetric about x = 50. Starts at the
+  point, runs up the left side, over the left lobe, down into the notch, up
+  over the right lobe and back down to the point. SVG's Y axis points down, so
+  y = 4 is the top of the lobes and y = 90 is the point.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <path
+    fill="#d6336c"
+    fill-rule="nonzero"
+    d="M 50 90
+       C 20 68, 2 50, 2 30
+       C 2 14, 14 4, 27 4
+       C 37 4, 45 10, 50 18
+       C 55 10, 63 4, 73 4
+       C 86 4, 98 14, 98 30
+       C 98 50, 80 68, 50 90
+       Z" />
+</svg>

@@ -78,9 +78,18 @@ export function newItem(shapeId: string, params: ParamValues, operation: Operati
   return { shapeId, params, position: { x: 0, y: 0, z: 0 }, rotationZ: 0, operation };
 }
 
-/** Every parameter of a shape at its declared default. */
+/**
+ * Every parameter of a shape at its declared default.
+ *
+ * Object defaults — an outline — are cloned. Handing out the catalogue's own
+ * object would give every new item a reference to the same one, so anything
+ * that edited it in place would reach back into the library and into every
+ * other item that had ever taken the default.
+ */
 export function defaultParams(params: ParamSpec[]): ParamValues {
-  return Object.fromEntries(params.map((p) => [p.key, p.default]));
+  return Object.fromEntries(
+    params.map((p) => [p.key, typeof p.default === "object" ? structuredClone(p.default) : p.default]),
+  );
 }
 
 /**

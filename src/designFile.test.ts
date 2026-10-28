@@ -11,6 +11,7 @@ import {
 } from "./designFile";
 import type { DesignStore } from "./designFile";
 import { catalog } from "./shapes/shapeLibrary";
+import { HEART_OUTLINE } from "./svg/heart";
 
 // The real catalogue, so these tests track the shape library rather than a
 // hand-written copy of it that could drift.
@@ -52,6 +53,19 @@ const engraved: Design = {
   ],
 };
 
+/** A design whose second item is an engraved imported outline. */
+const engravedHeart: Design = {
+  version: DESIGN_VERSION,
+  items: [
+    newItem("box", { width: 60, depth: 40, height: 5 }),
+    {
+      ...newItem("outline", { outline: HEART_OUTLINE, size: 20, depth: 1.5 }, "cut"),
+      position: { x: 0, y: 0, z: 4 },
+      rotationZ: 0,
+    },
+  ],
+};
+
 /** Deep-clone and mutate a valid design, so each case differs in one way only. */
 function broken(mutate: (d: any) => void): unknown {
   const copy = structuredClone(plate) as any;
@@ -62,6 +76,13 @@ function broken(mutate: (d: any) => void): unknown {
 /** The same, for the text design, so text cases can be broken one field at a time. */
 function brokenText(mutate: (d: any) => void): unknown {
   const copy = structuredClone(engraved) as any;
+  mutate(copy);
+  return copy;
+}
+
+/** The same again, for the design whose second item is an imported outline. */
+function brokenOutline(mutate: (d: any) => void): unknown {
+  const copy = structuredClone(engravedHeart) as any;
   mutate(copy);
   return copy;
 }
@@ -118,6 +139,41 @@ describe("round trip", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.design.items[1].params.text).toBe('  a "quoted" \\ back? ');
+  });
+
+  it("round-trips a design containing an imported outline", () => {
+    // The outline is the one parameter whose value is a whole object, so this
+    // is where nested structure has to survive JSON in both directions.
+    const result = parseDesign(serialiseDesign(engravedHeart), CATALOG);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.design).toEqual(engravedHeart);
+
+    const outline = result.design.items[1].params.outline as typeof HEART_OUTLINE;
+    expect(outline.loops).toHaveLength(1);
+    expect(outline.loops[0].hole).toBe(false);
+    // The path data is the whole point: it must come back character for
+    // character, since every curve in the drawing is in there.
+    expect(outline.loops[0].d).toBe(HEART_OUTLINE.loops[0].d);
+  });
+
+  it("survives a second trip with an outline, so loading is not lossy", () => {
+    const once = parseDesign(serialiseDesign(engravedHeart), CATALOG);
+    expect(once.ok).toBe(true);
+    if (!once.ok) return;
+    const twice = parseDesign(serialiseDesign(once.design), CATALOG);
+    expect(twice.ok).toBe(true);
+    if (!twice.ok) return;
+    expect(twice.design).toEqual(engravedHeart);
+  });
+
+  it("round-trips an outline through the autosave slot", () => {
+    const store = fakeStore();
+    autosave(engravedHeart, store);
+    const result = restoreAutosave(CATALOG, store);
+    expect(result.status).toBe("restored");
+    if (result.status !== "restored") return;
+    expect(result.design).toEqual(engravedHeart);
   });
 
   it("round-trips text through the autosave slot too", () => {
@@ -185,6 +241,58 @@ describe("rejecting invalid designs", () => {
     [
       "a letter height outside the limits",
       brokenText((d) => (d.items[1].params.letterHeight = 0)),
+      /Item 2.*outside the allowed/i,
+    ],
+
+    // --- the outline parameter kind ---
+    [
+      "an outline that is not an object",
+      brokenOutline((d) => (d.items[1].params.outline = "M 0 0 Z")),
+      /Item 2.*must be an object with a "loops" array/i,
+    ],
+    [
+      "an outline with no loops array",
+      brokenOutline((d) => (d.items[1].params.outline = {})),
+      /Item 2.*needs a "loops" array/i,
+    ],
+    [
+      "an outline with an empty loops array",
+      brokenOutline((d) => (d.items[1].params.outline = { loops: [] })),
+      /Item 2.*no loops/i,
+    ],
+    [
+      "an outline loop with no path data",
+      brokenOutline((d) => (d.items[1].params.outline.loops[0].d = "")),
+      /Item 2.*loop 1 has no path data/i,
+    ],
+    [
+      "an outline loop whose hole flag is not a boolean",
+      brokenOutline((d) => (d.items[1].params.outline.loops[0].hole = "yes")),
+      /Item 2.*loop 1: hole must be true or false/i,
+    ],
+    [
+      "an outline that starts with a hole",
+      brokenOutline((d) => (d.items[1].params.outline.loops[0].hole = true)),
+      /Item 2.*starts with a hole/i,
+    ],
+    [
+      "an unexpected field on an outline",
+      brokenOutline((d) => (d.items[1].params.outline.fillRule = "evenodd")),
+      /Item 2.*unexpected fields: fillRule/i,
+    ],
+    [
+      "an unexpected field on an outline loop",
+      brokenOutline((d) => (d.items[1].params.outline.loops[0].colour = "red")),
+      /Item 2.*loop 1 has unexpected fields: colour/i,
+    ],
+    [
+      "an outline past the path-data cap",
+      brokenOutline((d) => (d.items[1].params.outline.loops[0].d = `M 0 0 ${"L 1 1 ".repeat(30_000)}Z`)),
+      /Item 2.*characters of path data, over the/i,
+    ],
+    [
+      "a size outside the limits",
+      brokenOutline((d) => (d.items[1].params.size = 900)),
       /Item 2.*outside the allowed/i,
     ],
   ];

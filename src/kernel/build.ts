@@ -9,6 +9,7 @@ import { shapeById } from "../shapes/shapeLibrary";
 import type { ParamValues } from "../shapes/shapeLibrary";
 import type { Design, DesignItem } from "../design";
 import type { PartMesh } from "../mesh";
+import { assertShapeIsSound, findMeshProblem } from "./soundness";
 
 /**
  * How finely to tessellate for display. Fine enough that a 5 mm hole reads as
@@ -46,8 +47,12 @@ export function buildShape(shapeId: string, params: ParamValues): PartData {
 }
 
 /** Build one item from the library and put it where the design says. */
-function placeItem(item: DesignItem): Shape3D {
+function placeItem(item: DesignItem, index: number): Shape3D {
   const shape = shapeById(item.shapeId).build(item.params);
+  // Checked before it is combined with anything, so the message can name the
+  // item that is wrong rather than the design that contains it. A boolean
+  // against invalid geometry produces nonsense without complaining.
+  assertShapeIsSound(shape, `Item ${index + 1} (${item.operation} ${item.shapeId})`);
   // Rotate about the origin first, then translate — so position means "where
   // the shape's own origin ends up", regardless of how it is turned.
   const rotated = item.rotationZ ? shape.rotate(item.rotationZ, [0, 0, 0], [0, 0, 1]) : shape;
@@ -71,10 +76,10 @@ export function buildDesignShape(design: Design): Shape3D {
     throw new Error("The first item must be added, not cut — there is nothing to cut from yet.");
   }
 
-  let result = placeItem(items[0]);
+  let result = placeItem(items[0], 0);
   for (let i = 1; i < items.length; i++) {
     const item = items[i];
-    const piece = placeItem(item);
+    const piece = placeItem(item, i);
     result = item.operation === "add" ? result.fuse(piece) : result.cut(piece);
 
     // Check as we go rather than only at the end, so the message can name the
@@ -95,11 +100,30 @@ export function buildDesignShape(design: Design): Shape3D {
   // Re-seat on the bed. Items are positioned relative to each other; where the
   // combined result lands in Z is not something the user should have to manage.
   const lowestZ = result.boundingBox.bounds[0][2];
-  return lowestZ === 0 ? result : result.translate([0, 0, -lowestZ]);
+  const seated = lowestZ === 0 ? result : result.translate([0, 0, -lowestZ]);
+
+  // And once more on the finished part. Every item can be a sound solid and the
+  // combination still not be — a boolean between two valid shapes can leave a
+  // zero-thickness wall or a face that touches itself.
+  assertShapeIsSound(seated, "This design");
+  return seated;
 }
 
 /** A whole design, ready for the viewport. */
 export function buildDesign(design: Design): PartData {
   const shape = buildDesignShape(design);
-  return { volumeMm3: measureVolume(shape), mesh: toPartMesh(shape) };
+  const mesh = toPartMesh(shape);
+
+  // The last check, on the actual triangles. Free here, because the mesh had to
+  // be made anyway, and it is the only one that speaks for what a slicer will
+  // see rather than for what the kernel believes.
+  const problem = findMeshProblem(mesh);
+  if (problem) {
+    throw new Error(
+      `This design built a solid, but its surface is not sound: ${problem}. ` +
+        "It has not been shown or exported.",
+    );
+  }
+
+  return { volumeMm3: measureVolume(shape), mesh };
 }

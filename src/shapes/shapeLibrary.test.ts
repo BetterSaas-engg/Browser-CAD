@@ -4,6 +4,7 @@ import initOpenCascade from "replicad-opencascadejs";
 import { MAX_MM, SHAPES, defaultsFor } from "./shapeLibrary";
 import type { ParamValues, ShapeDef } from "./shapeLibrary";
 import { loadBundledFontsFromDisk } from "./bundledFonts.node";
+import { HEART_OUTLINE } from "../svg/heart";
 
 // Compiling 23 MB of WebAssembly is slow the first time; give it room. The
 // fonts come along because Text is a shape in the library like any other.
@@ -58,6 +59,12 @@ const EXTRA_CASES: Record<string, ParamValues[]> = {
   text: [
     { text: "AK + 2 = ?", letterHeight: 6, depth: 1, font: "rounded" },
     { text: "j", letterHeight: 20, depth: 4, font: "sans" },
+  ],
+  // Same idea for the outline: the expected box comes from solving the stored
+  // cubics, the measured one from OpenCascade extruding them.
+  outline: [
+    { outline: HEART_OUTLINE, size: 80, depth: 1 },
+    { outline: HEART_OUTLINE, size: 6, depth: 0.4 },
   ],
 };
 
@@ -143,6 +150,16 @@ describe.each(SHAPES.map((shape) => [shape.id, shape] as const))("%s", (_id, sha
         expect(param.options.map((o) => o.value)).toContain(param.default);
         continue;
       }
+      if (param.kind === "outline") {
+        // The default has to be real geometry: an empty outline would make a
+        // new item break the design the moment it was added (D24).
+        expect(param.default.loops.length).toBeGreaterThan(0);
+        expect(param.default.loops[0].hole).toBe(false);
+        expect(param.maxCharacters).toBeGreaterThan(0);
+        const characters = param.default.loops.reduce((total, l) => total + l.d.length, 0);
+        expect(characters).toBeLessThanOrEqual(param.maxCharacters);
+        continue;
+      }
       expect(param.min).toBeLessThan(param.max);
       expect(param.max).toBeLessThanOrEqual(MAX_MM);
       expect(param.default).toBeGreaterThanOrEqual(param.min);
@@ -159,11 +176,11 @@ describe.each(SHAPES.map((shape) => [shape.id, shape] as const))("%s", (_id, sha
 });
 
 it("only lets a shape skip its volume formula when there is genuinely none", () => {
-  // Text is the single exception, and it earns it: a string of glyph outlines
-  // has no closed-form area. Anything else appearing here is a formula that
-  // went missing rather than one that was never possible.
+  // Two exceptions, and both earn it: a string of glyph outlines and an
+  // imported drawing each have no closed-form area. Anything else appearing
+  // here is a formula that went missing rather than one never possible.
   const without = SHAPES.filter((s) => s.volumeMm3 === null).map((s) => s.id);
-  expect(without).toEqual(["text"]);
+  expect(without).toEqual(["text", "outline"]);
 });
 
 it("has unique shape ids and unique parameter keys within each shape", () => {

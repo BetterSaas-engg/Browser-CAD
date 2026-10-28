@@ -81,7 +81,7 @@ describe("refusing what it cannot draw", () => {
 
   it("names the font, so switching fonts is an obvious fix", () => {
     expect(() => build({ text: "😀", font: "sans" })).toThrow(/Noto Sans/);
-    expect(() => build({ text: "😀", font: "rounded" })).toThrow(/Nunito/);
+    expect(() => build({ text: "😀", font: "rounded" })).toThrow(/Sniglet/);
   });
 
   it("counts an emoji as one character rather than two halves", () => {
@@ -130,7 +130,7 @@ describe("size and placement", () => {
     "%s measures a capital at the letter height asked for, to the micron",
     (font) => {
       // Some fonts round the foot of their H a little below the baseline —
-      // Nunito does, by 8 units in 1000 — and that overshoot lands in the ink
+      // Sniglet does, by 4 units in 718 — and that overshoot lands in the ink
       // box too. Scaling the expectation from the font's own metrics pins both
       // fonts exactly, rather than hiding the difference under a tolerance
       // wide enough to cover it.

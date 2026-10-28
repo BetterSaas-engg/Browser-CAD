@@ -19,7 +19,10 @@ import {
   isShape3D,
   makeSphere,
 } from "replicad";
-import type { Shape3D } from "replicad";
+import type { Drawing, Shape3D } from "replicad";
+import { MAX_OUTLINE_CHARACTERS, outlineBounds, readLoop } from "../svg/outline";
+import type { Outline, Point } from "../svg/outline";
+import { HEART_OUTLINE } from "../svg/heart";
 import {
   DEFAULT_FONT_ID,
   FONTS,
@@ -81,9 +84,23 @@ export interface ChoiceParamSpec extends ParamSpecBase {
   options: { value: string; label: string }[];
 }
 
-export type ParamSpec = NumberParamSpec | TextParamSpec | ChoiceParamSpec;
+/**
+ * An imported outline — closed loops of lines and curves, already normalised.
+ *
+ * The only parameter whose value is not a single scalar. It is still plain
+ * JSON, which is what D23 asks of a design; what it is not is something a text
+ * box can edit, so the form offers a file to import instead.
+ */
+export interface OutlineParamSpec extends ParamSpecBase {
+  kind: "outline";
+  default: Outline;
+  /** Cap on the path data, in characters, so a design stays a sane size. */
+  maxCharacters: number;
+}
 
-export type ParamValue = number | string;
+export type ParamSpec = NumberParamSpec | TextParamSpec | ChoiceParamSpec | OutlineParamSpec;
+
+export type ParamValue = number | string | Outline;
 export type ParamValues = Record<string, ParamValue>;
 
 /** Values for a shape whose parameters are all numbers — every shape but Text. */
@@ -195,6 +212,18 @@ type TextValues = ParamValues & {
 const textShape = (def: ShapeDef<TextValues>): ShapeDef => def as ShapeDef;
 
 /**
+ * The warning every shape that extrudes a thin flat feature shares.
+ *
+ * One threshold and one phrasing, named once: Text and Outline both raise or
+ * engrave a face a millimetre or two proud, and the advice is the same for
+ * both. Writing it twice is how the two drift apart (D39).
+ */
+const thinDepth = (feature: string): NumberParamSpec["warnBelow"] => ({
+  value: 0.6,
+  message: `Under 0.6 mm this is only two or three layers, so the ${feature} may barely show.`,
+});
+
+/**
  * Lay a string out as a drawing centred on the origin, and say how big the ink
  * is.
  *
@@ -225,7 +254,8 @@ function layOutText({ text, letterHeight, font: fontId }: TextValues): {
   /*
    * The ink box comes from opentype, not from `drawing.boundingBox`.
    * OpenCascade's 2D box is generous around a Bézier — measured 0.03 mm wide on
-   * "AK + 2 = ?" in Nunito — which would push the text off centre by half that.
+   * "AK + 2 = ?" in the rounded font — which would push the text off centre by
+   * half that.
    * opentype solves the curve extrema instead, and agrees with the extruded
    * solid to about 1e-4 mm.
    *
@@ -239,6 +269,103 @@ function layOutText({ text, letterHeight, font: fontId }: TextValues): {
   );
 
   return { drawing, widthMm: ink.x2 - ink.x1, heightMm: ink.y2 - ink.y1 };
+}
+
+// --- imported outlines -----------------------------------------------------
+
+/** The Outline shape's parameters. */
+type OutlineValues = ParamValues & {
+  outline: Outline;
+  size: number;
+  depth: number;
+};
+
+/** As `numericShape`, for the entry whose main parameter is an outline. */
+const outlineShape = (def: ShapeDef<OutlineValues>): ShapeDef => def as ShapeDef;
+
+/**
+ * How much to scale a stored outline, and where its centre is.
+ *
+ * The importer already centres an outline and sizes its longer side to 1, so
+ * this would be `size` and the origin for anything this app wrote. It is
+ * measured again anyway: a hand-edited design, or one written by a model (D16),
+ * has not been through the importer, and `size` must still mean the longer side
+ * in millimetres rather than almost that.
+ */
+function outlinePlacement(outline: Outline, size: number): { scale: number; centre: Point } {
+  if (outline.loops.length === 0) {
+    throw new Error("This outline has no loops, so there is nothing to extrude.");
+  }
+  const bounds = outlineBounds(outline);
+  const longer = Math.max(bounds.width, bounds.height);
+  if (!(longer > 0)) {
+    throw new Error("This outline has no width or height, so there is nothing to extrude.");
+  }
+  return {
+    scale: size / longer,
+    centre: [(bounds.minX + bounds.maxX) / 2, (bounds.minY + bounds.maxY) / 2],
+  };
+}
+
+/** One closed loop as a replicad drawing, in millimetres. */
+function drawOutlineLoop(d: string, scale: number, centre: Point): Drawing {
+  const at = ([x, y]: Point): Point => [(x - centre[0]) * scale, (y - centre[1]) * scale];
+
+  const segments = readLoop(d);
+  const [first, ...rest] = segments;
+  if (first.kind !== "move") throw new Error("An outline loop must begin with M.");
+
+  let pen = draw(at(first.to));
+  for (const segment of rest) {
+    if (segment.kind === "cubic") {
+      pen = pen.cubicBezierCurveTo(at(segment.to), at(segment.c1), at(segment.c2));
+    } else if (segment.kind === "line") {
+      pen = pen.lineTo(at(segment.to));
+    } else {
+      throw new Error("An outline loop may hold only one M.");
+    }
+  }
+  // Closed rather than `done()`: a fill needs a closed wire, and SVG closes an
+  // open subpath when it fills it too.
+  return pen.close();
+}
+
+/**
+ * Fold an outline's loops into one 2D drawing.
+ *
+ * The loops arrive in the order the importer worked out: within each filled
+ * element, outermost first, so a hole is only ever cut from material that is
+ * already there. The fill rule was resolved at import — by the time the kernel
+ * sees it, a loop is simply material or a hole.
+ */
+function drawOutline(outline: Outline, size: number): Drawing {
+  const { scale, centre } = outlinePlacement(outline, size);
+
+  let result: Drawing | null = null;
+  for (const [index, loop] of outline.loops.entries()) {
+    const drawing = drawOutlineLoop(loop.d, scale, centre);
+    if (result === null) {
+      if (loop.hole) {
+        throw new Error(
+          "The first loop of an outline is marked as a hole, so there is nothing for it " +
+            "to be a hole in.",
+        );
+      }
+      result = drawing;
+      continue;
+    }
+    try {
+      result = loop.hole ? result.cut(drawing) : result.fuse(drawing);
+    } catch (error) {
+      throw new Error(
+        `Could not ${loop.hole ? "cut" : "add"} loop ${index + 1} of this outline: ` +
+          `${error instanceof Error ? error.message : error}`,
+      );
+    }
+  }
+
+  if (result === null) throw new Error("This outline produced no geometry.");
+  return result;
 }
 
 /** A text value reduced to something that is safe in a filename. */
@@ -370,13 +497,7 @@ export const SHAPES: ShapeDef[] = [
             "Under 5 mm, strokes get close to a single 0.4 mm extrusion — fine detail may not survive.",
         },
       },
-      {
-        ...size("depth", "Depth", 2),
-        warnBelow: {
-          value: 0.6,
-          message: "Under 0.6 mm this is only two or three layers, so the text may barely show.",
-        },
-      },
+      { ...size("depth", "Depth", 2), warnBelow: thinDepth("text") },
       {
         kind: "choice",
         key: "font",
@@ -425,6 +546,63 @@ export const SHAPES: ShapeDef[] = [
         .filter((part) => part !== "")
         .join("-");
     },
+  }),
+
+  outlineShape({
+    id: "outline",
+    label: "Outline (SVG)",
+    params: [
+      {
+        kind: "outline",
+        key: "outline",
+        label: "Outline",
+        // A heart, so a new item is something rather than an error. Replaced by
+        // importing a file. See svg/heart.ts.
+        default: HEART_OUTLINE,
+        maxCharacters: MAX_OUTLINE_CHARACTERS,
+      },
+      // The longer side, whichever that is. Aspect ratio is never a parameter:
+      // an imported drawing has one already, and letting it be set separately
+      // is just a way to squash someone's drawing by accident.
+      size("size", "Size (longer side)", 40),
+      { ...size("depth", "Depth", 2), warnBelow: thinDepth("outline") },
+    ],
+
+    /*
+     * Extruded up from the XY plane, so the underside sits on z = 0 and the
+     * outline is centred on its own bounding box — the same convention as Text
+     * (D35), and for the same reason: placing a shape on a face is a visual
+     * act, so the middle of what you can see is the middle.
+     */
+    build: (v) => extrude(drawOutline(v.outline, v.size), v.depth),
+
+    /*
+     * No formula, for the same reason as Text (D36): an imported outline is
+     * whatever someone drew, and it has no closed-form area. It is pinned down
+     * by properties instead — a 10 mm square really is 100 mm² of material, a
+     * square with a square hole loses exactly the hole, an L does not come out
+     * mirrored. See outline.test.ts.
+     */
+    volumeMm3: null,
+
+    /*
+     * From the stored path data rather than from the solid, so the test
+     * compares two independent routes: solving the cubics' extremes here
+     * against OpenCascade's extrusion of the same curves.
+     */
+    boundingBoxMm: ({ outline, size: longerSide, depth }) => {
+      const bounds = outlineBounds(outline);
+      const { scale } = outlinePlacement(outline, longerSide);
+      return [bounds.width * scale, bounds.height * scale, depth];
+    },
+
+    /*
+     * Nothing in an outline is a name, so the file is named after its
+     * dimensions alone. Two different drawings at the same size and depth
+     * therefore export to the same filename — worth knowing before exporting a
+     * pair of them into the same folder.
+     */
+    filename: ({ size: longerSide, depth }) => `outline-s${n(longerSide)}-d${n(depth)}`,
   }),
 ];
 

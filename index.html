@@ -270,6 +270,43 @@
         display: none;
       }
 
+      /* An imported outline: a button to replace it, and what is loaded now. */
+      .outline-control {
+        display: flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .outline-import {
+        font: inherit;
+        font-size: 0.78rem;
+        flex: 0 0 auto;
+        color: #e6e8ea;
+        background: #2f3640;
+        border: 1px solid #3a424b;
+        border-radius: 4px;
+        padding: 0.25rem 0.5rem;
+        cursor: pointer;
+      }
+      .outline-import:hover {
+        background: #39414c;
+      }
+      .outline-import:focus-visible {
+        outline: 2px solid #5c9ded;
+        outline-offset: -1px;
+      }
+      .outline-summary {
+        font-size: 0.68rem;
+        color: #9aa3ad;
+        /* Never widens the sidebar, however much it has to say. */
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .outline-control.invalid .outline-import {
+        border-color: #ff8a8a;
+      }
+
       /* Short related fields share a row. */
       .field-row {
         display: grid;

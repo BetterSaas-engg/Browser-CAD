@@ -14,6 +14,7 @@ import type { Design, DesignItem, Operation, Vec3 } from "./design";
 import type {
   ChoiceParamSpec,
   NumberParamSpec,
+  OutlineParamSpec,
   ParamSpec,
   ParamValue,
   ParamValues,
@@ -86,6 +87,54 @@ function checkChoice(value: unknown, spec: ChoiceParamSpec, where: string): stri
   return null;
 }
 
+/**
+ * Validate an imported outline.
+ *
+ * Structure and limits only — the loops are checked for shape, not redrawn. The
+ * path data itself is verified by `readLoop` the moment the kernel reads it,
+ * which is the one place that knows what it can draw; duplicating a path parser
+ * here would be a second opinion that could disagree with the first.
+ */
+function checkOutline(value: unknown, spec: OutlineParamSpec, where: string): string | null {
+  if (!isPlainObject(value)) {
+    return `${where}: ${spec.label} must be an object with a "loops" array.`;
+  }
+  const extra = unknownKeys(value, ["loops"]);
+  if (extra.length) {
+    return `${where}: ${spec.label} has unexpected fields: ${extra.join(", ")}.`;
+  }
+  if (!Array.isArray(value.loops)) return `${where}: ${spec.label} needs a "loops" array.`;
+  if (value.loops.length === 0) {
+    return `${where}: ${spec.label} has no loops, so there is nothing to extrude.`;
+  }
+
+  let characters = 0;
+  for (const [index, raw] of value.loops.entries()) {
+    const which = `${where}: ${spec.label} loop ${index + 1}`;
+    if (!isPlainObject(raw)) return `${which} is not an object.`;
+    const loopExtra = unknownKeys(raw, ["d", "hole"]);
+    if (loopExtra.length) return `${which} has unexpected fields: ${loopExtra.join(", ")}.`;
+    if (typeof raw.d !== "string" || raw.d.trim() === "") {
+      return `${which} has no path data.`;
+    }
+    if (typeof raw.hole !== "boolean") {
+      return `${which}: hole must be true or false, but it is ${JSON.stringify(raw.hole)}.`;
+    }
+    characters += raw.d.length;
+  }
+
+  if (value.loops[0] !== null && (value.loops[0] as Record<string, unknown>).hole === true) {
+    return `${where}: ${spec.label} starts with a hole, so there is nothing for it to be a hole in.`;
+  }
+  if (characters > spec.maxCharacters) {
+    return (
+      `${where}: ${spec.label} holds ${characters.toLocaleString()} characters of path data, ` +
+      `over the ${spec.maxCharacters.toLocaleString()} a design allows.`
+    );
+  }
+  return null;
+}
+
 /** Check one value against its own spec, whatever kind of parameter it is. */
 function checkParam(value: unknown, spec: ParamSpec, where: string): string | null {
   switch (spec.kind) {
@@ -95,6 +144,8 @@ function checkParam(value: unknown, spec: ParamSpec, where: string): string | nu
       return checkText(value, spec, where);
     case "choice":
       return checkChoice(value, spec, where);
+    case "outline":
+      return checkOutline(value, spec, where);
   }
 }
 

@@ -31,7 +31,7 @@ export interface FontDef {
  */
 export const FONTS: FontDef[] = [
   { id: "sans", label: "Sans — Noto Sans", file: "NotoSans-Regular.ttf" },
-  { id: "rounded", label: "Rounded bold — Nunito Bold", file: "Nunito-Bold.ttf" },
+  { id: "rounded", label: "Rounded bold — Sniglet ExtraBold", file: "Sniglet-ExtraBold.ttf" },
 ];
 
 export const DEFAULT_FONT_ID = FONTS[0].id;
@@ -78,12 +78,13 @@ export function loadedFont(id: string): Font {
  * The em size that makes a capital letter exactly `capHeightMm` tall.
  *
  * opentype sizes text by the em square, which is taller than any letter and
- * differs between fonts — 10 pt of Noto Sans and 10 pt of Nunito do not measure
+ * differs between fonts — 10 pt of Noto Sans and 10 pt of Sniglet do not measure
  * the same. Callipers measure the capital, so that is what the parameter means.
  *
  * Cap height comes from the top of a drawn "H" rather than the font's declared
- * `OS/2.sCapHeight`, because the two disagree: Nunito Bold declares 705 units
- * and draws its H to 713. The drawn height is the one that ends up on the bed.
+ * `OS/2.sCapHeight`, because the two disagree: Sniglet ExtraBold declares 700
+ * units and draws its H to 718. The drawn height is the one that ends up on the
+ * bed, and the one callipers will find.
  */
 export function emSizeForCapHeight(font: Font, capHeightMm: number): number {
   const capHeightUnits = font.charToGlyph("H").getBoundingBox().y2;
