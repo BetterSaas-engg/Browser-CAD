@@ -270,6 +270,36 @@
         display: none;
       }
 
+      /* Symbols that cannot be typed, as buttons under the Text field. */
+      .symbol-row {
+        display: flex;
+        gap: 0.3rem;
+        margin-top: 0.25rem;
+      }
+      .symbol-insert {
+        font: inherit;
+        /* Larger than the labels: these are the glyphs themselves, and at
+           0.68rem a heart is a smudge. */
+        font-size: 0.95rem;
+        line-height: 1;
+        flex: 0 0 auto;
+        min-width: 1.9rem;
+        color: #e6e8ea;
+        background: #2f3640;
+        border: 1px solid #3a424b;
+        border-radius: 4px;
+        padding: 0.15rem 0.35rem;
+        cursor: pointer;
+      }
+      .symbol-insert:hover {
+        background: #39414c;
+        border-color: #4a5560;
+      }
+      .symbol-insert:focus-visible {
+        outline: 2px solid #5c9ded;
+        outline-offset: -1px;
+      }
+
       /* An imported outline: a button to replace it, and what is loaded now. */
       .outline-control {
         display: flex;

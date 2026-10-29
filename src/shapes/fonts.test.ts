@@ -1,7 +1,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { getFont } from "replicad";
-import { DEFAULT_FONT_ID, FONTS, assertFontCanDraw, emSizeForCapHeight, fontDef } from "./fonts";
+import { DEFAULT_FONT_ID, FONTS, emSizeForCapHeight, fontDef } from "./fonts";
+import { assertTextIsDrawable } from "./textLayout";
 import { loadBundledFontsFromDisk } from "./bundledFonts.node";
+import { countSelfCrossings } from "../svg/outline";
 import type { Point } from "../svg/outline";
 
 /** The opentype font object replicad hands back. */
@@ -116,30 +118,12 @@ function glyphContours(font: Font, character: string, perCurve = 24): Point[][] 
   return contours;
 }
 
-/** Proper crossings within each contour. Shared endpoints do not count. */
+/** Proper crossings within each contour, using the shared counter. */
 function countSelfIntersections(font: Font, character: string): number {
-  const side = (a: Point, b: Point, c: Point): number =>
-    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-  const crosses = (p1: Point, p2: Point, p3: Point, p4: Point): boolean => {
-    const d1 = side(p3, p4, p1);
-    const d2 = side(p3, p4, p2);
-    const d3 = side(p1, p2, p3);
-    const d4 = side(p1, p2, p4);
-    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
-  };
-
-  let hits = 0;
-  for (const contour of glyphContours(font, character)) {
-    const n = contour.length;
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 2; j < n; j++) {
-        // The first and last edges meet at the closing point.
-        if (i === 0 && j === n - 1) continue;
-        if (crosses(contour[i], contour[(i + 1) % n], contour[j], contour[(j + 1) % n])) hits++;
-      }
-    }
-  }
-  return hits;
+  return glyphContours(font, character).reduce(
+    (total, contour) => total + countSelfCrossings(contour),
+    0,
+  );
 }
 
 describe("the font list itself", () => {
@@ -158,20 +142,20 @@ describe("the font list itself", () => {
   });
 });
 
-describe("assertFontCanDraw", () => {
+describe("assertTextIsDrawable", () => {
   it("passes everything the shape promises, in both fonts", () => {
     for (const { id } of FONTS) {
-      expect(() => assertFontCanDraw(PROMISED, id)).not.toThrow();
+      expect(() => assertTextIsDrawable(PROMISED, id)).not.toThrow();
     }
   });
 
   it("names the character, its code point and its position", () => {
-    expect(() => assertFontCanDraw("ok 漢 no", "sans")).toThrow(/"漢" \(U\+6F22\)/);
-    expect(() => assertFontCanDraw("ok 漢 no", "sans")).toThrow(/character 4 of 7/);
+    expect(() => assertTextIsDrawable("ok 漢 no", "sans")).toThrow(/"漢" \(U\+6F22\)/);
+    expect(() => assertTextIsDrawable("ok 漢 no", "sans")).toThrow(/character 4 of 7/);
   });
 
   it("shows a control character as an escape rather than as nothing", () => {
     // "has no glyph for  (U+000A)" would read as a bug in the message itself.
-    expect(() => assertFontCanDraw("a\nb", "sans")).toThrow(/"\\n" \(U\+000A\)/);
+    expect(() => assertTextIsDrawable("a\nb", "sans")).toThrow(/"\\n" \(U\+000A\)/);
   });
 });

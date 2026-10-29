@@ -94,40 +94,55 @@ export function emSizeForCapHeight(font: Font, capHeightMm: number): number {
   return (capHeightMm * font.unitsPerEm) / capHeightUnits;
 }
 
+/** The top of a drawn capital, in font units. See {@link emSizeForCapHeight}. */
+export function capHeightUnits(font: Font): number {
+  return font.charToGlyph("H").getBoundingBox().y2;
+}
+
+/** The capitals a font's typical spacing is measured over. */
+const SPACING_SAMPLE = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+/**
+ * How much clear space a font leaves on one side of a capital, in font units.
+ *
+ * A glyph's advance width is wider than its ink; the difference is its two
+ * sidebearings, and the gap you see between two letters is the right-hand
+ * bearing of the first plus the left-hand bearing of the second. Averaged over
+ * the capitals, that is the font's own idea of how far apart letters sit.
+ *
+ * This is what spaces a symbol: give it this much clear space on each side and
+ * it sits in the line the way a letter does, in a font that sets tightly as
+ * well as one that sets loosely. Measured rather than chosen by eye — the two
+ * bundled faces disagree by more than half, 50.5 units against 32.3.
+ */
+export function meanSideBearingUnits(font: Font): number {
+  let total = 0;
+  let counted = 0;
+  for (const character of SPACING_SAMPLE) {
+    const glyph = font.charToGlyph(character);
+    const box = glyph.getBoundingBox();
+    const advance = glyph.advanceWidth;
+    if (advance === undefined || !Number.isFinite(box.x1) || !Number.isFinite(box.x2)) continue;
+    // Both bearings of this glyph, averaged, so one lopsided letter counts once.
+    total += (box.x1 + (advance - box.x2)) / 2;
+    counted++;
+  }
+  if (counted === 0) {
+    throw new Error("This font has no capitals to measure its spacing from.");
+  }
+  return total / counted;
+}
+
+/** Whether the font itself can draw a character. */
+export function fontHasGlyph(font: Font, character: string): boolean {
+  return font.charToGlyphIndex(character) > 0;
+}
+
 /** Name a character the way a person would recognise it in a message. */
-function describe(character: string): string {
+export function describe(character: string): string {
   const codePoint = character.codePointAt(0) ?? 0;
   const hex = `U+${codePoint.toString(16).toUpperCase().padStart(4, "0")}`;
   // Control characters have no glyph to show, so show the escape instead.
   const shown = codePoint < 0x20 || codePoint === 0x7f ? JSON.stringify(character) : `"${character}"`;
   return `${shown} (${hex})`;
-}
-
-/**
- * Refuse text the font cannot draw, naming the character.
- *
- * This matters more than it looks. opentype does not fail on a character it
- * lacks — it substitutes `.notdef`, which in both bundled fonts is a filled
- * rectangle. So the silent outcome is not a missing letter but a printed block,
- * and the first time you would notice is on the bed.
- *
- * The check runs against the real font, not a fixed list of allowed characters.
- * A list would have to be duplicated into the page, where there is no font to
- * consult, and would then reject "é" and "€" — which both fonts actually have.
- */
-export function assertFontCanDraw(text: string, fontId: string): void {
-  const def = fontDef(fontId);
-  const font = loadedFont(fontId);
-
-  // Iterate code points, not UTF-16 units, so an emoji is reported as one
-  // character rather than as two meaningless halves.
-  const characters = [...text];
-  for (const [index, character] of characters.entries()) {
-    if (font.charToGlyphIndex(character) > 0) continue;
-    throw new Error(
-      `${def.label} has no glyph for ${describe(character)}, ` +
-        `character ${index + 1} of ${characters.length}. ` +
-        "Remove it or choose another font — it would otherwise print as a solid block.",
-    );
-  }
 }

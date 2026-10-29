@@ -264,6 +264,43 @@ export function pointInPolygon([x, y]: Point, polygon: Point[]): boolean {
   return inside;
 }
 
+/**
+ * How many times a closed polyline crosses itself.
+ *
+ * Shared by the font check and the symbol check, because they are asking the
+ * same question of the same kind of data. It is the question that matters most
+ * before anything reaches the kernel: OpenCascade cannot make a valid face from
+ * a contour that crosses itself, and the result builds anyway — right volume,
+ * right bounding box, faces missing. That is D50, and this is how it is caught
+ * in advance rather than on the bed.
+ *
+ * Touching endpoints do not count; only proper crossings do.
+ */
+export function countSelfCrossings(points: Point[]): number {
+  const side = (a: Point, b: Point, c: Point): number =>
+    (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+
+  const crosses = (p1: Point, p2: Point, p3: Point, p4: Point): boolean => {
+    const d1 = side(p3, p4, p1);
+    const d2 = side(p3, p4, p2);
+    const d3 = side(p1, p2, p3);
+    const d4 = side(p1, p2, p4);
+    return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+  };
+
+  const n = points.length;
+  let hits = 0;
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 2; j < n; j++) {
+      // The first and last edges meet at the closing point, so they are
+      // neighbours rather than a crossing.
+      if (i === 0 && j === n - 1) continue;
+      if (crosses(points[i], points[(i + 1) % n], points[j], points[(j + 1) % n])) hits++;
+    }
+  }
+  return hits;
+}
+
 /** Total characters of path data, which is what the size cap is measured in. */
 export function outlineCharacters(outline: Outline): number {
   return outline.loops.reduce((total, loop) => total + loop.d.length, 0);

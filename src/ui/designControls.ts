@@ -15,9 +15,13 @@ import type {
   ParamValue,
   ParamValues,
   ShapeCatalogEntry,
+  TextParamSpec,
 } from "../shapes/shapeLibrary";
 import { importSvgOutline } from "../svg/importSvg";
 import type { Outline } from "../svg/outline";
+// Plain data with no replicad in it, so the page imports the symbol library
+// directly rather than waiting for the worker's catalogue (D53).
+import { SYMBOLS } from "../shapes/symbols";
 
 /** How long to wait after the last keystroke before rebuilding. */
 const DEBOUNCE_MS = 350;
@@ -404,6 +408,49 @@ export function createDesignControls(
     };
   }
 
+  /**
+   * A row of buttons that drop a symbol into a text field at the cursor.
+   *
+   * Built from the symbol library, so a new symbol gets its button without
+   * anything here changing. They exist because ♥ and ★ are not on a keyboard.
+   */
+  function makeSymbolButtons(spec: TextParamSpec, input: HTMLInputElement): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "symbol-row";
+
+    for (const symbol of SYMBOLS) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "symbol-insert";
+      button.textContent = symbol.character;
+      button.title = `Insert ${symbol.label.toLowerCase()} (${symbol.character})`;
+      button.setAttribute("aria-label", `Insert ${symbol.label.toLowerCase()}`);
+
+      button.addEventListener("click", () => {
+        const start = input.selectionStart ?? input.value.length;
+        const end = input.selectionEnd ?? start;
+        const before = input.value.slice(0, start);
+        const after = input.value.slice(end);
+        // `maxLength` stops the keyboard but not an assignment, so trim here too.
+        const next = `${before}${symbol.character}${after}`.slice(0, spec.maxLength);
+        input.value = next;
+
+        // Put the caret after what was inserted and hand focus back, so a
+        // second symbol or more typing carries on from the right place.
+        const caret = Math.min(before.length + symbol.character.length, next.length);
+        input.focus();
+        input.setSelectionRange(caret, caret);
+
+        // A button press is a finished action, not mid-typing, so rebuild now
+        // rather than after the keystroke debounce.
+        commit(true);
+      });
+
+      row.append(button);
+    }
+    return row;
+  }
+
   function makeField(
     spec: ParamSpec,
     value: ParamValue,
@@ -413,6 +460,8 @@ export function createDesignControls(
     error.className = "field-error";
     const warning = document.createElement("span");
     warning.className = "field-warning";
+    /** Anything the control wants shown beneath itself, before the messages. */
+    const extras: HTMLElement[] = [];
 
     const field = ((): Pick<Field, "control" | "read" | "check"> => {
       if (spec.kind === "outline") {
@@ -450,6 +499,7 @@ export function createDesignControls(
         input.spellcheck = false;
         input.value = String(value);
         input.addEventListener("input", () => commit(false));
+        extras.push(makeSymbolButtons(spec, input));
         return {
           control: input,
           read: () => input.value,
@@ -480,7 +530,7 @@ export function createDesignControls(
       ...field,
       error,
       warning,
-      element: labelled(shortLabel ?? spec.label, field.control, error, warning),
+      element: labelled(shortLabel ?? spec.label, field.control, ...extras, error, warning),
     };
   }
 
