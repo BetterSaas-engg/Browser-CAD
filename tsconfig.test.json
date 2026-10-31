@@ -1,11 +1,14 @@
 /*
- * Type-checking for the tests.
+ * Type-checking for everything that runs in Node.
  *
- * Identical to tsconfig.json except that Node's types are in scope, because
- * the tests load the bundled fonts off disk — Node has no server to fetch a
- * Vite-emitted asset URL from. Keeping that in its own config is what stops
- * `process` and `Buffer` from quietly type-checking inside application code,
- * where they would only fail once the page was open.
+ * Identical to tsconfig.json except that Node's types are in scope. Two kinds
+ * of file need them: the tests, which load the bundled fonts off disk because
+ * Node has no server to fetch a Vite-emitted asset URL from, and the
+ * `*.node.ts` modules that run in the dev server rather than in a tab.
+ *
+ * Keeping that in its own config is what stops `process` and `Buffer` from
+ * quietly type-checking inside application code, where they would only fail
+ * once the page was open.
  *
  * `npm run build` runs both configs. Vitest does not read either: it strips
  * types rather than checking them.

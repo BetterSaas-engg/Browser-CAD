@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# Where bundle.test.ts builds the app to check the API key is not in it. It
+# cleans up after itself; this is for the run that gets interrupted.
+dist-bundle-check
+
 # Environment files. The *.local rule above already catches .env.local, which
 # is the only one Vite's own template expects — but plain .env and .env.<mode>
 # are not covered by it, and a secret committed to a public repo cannot be

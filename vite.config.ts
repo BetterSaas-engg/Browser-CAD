@@ -1,8 +1,22 @@
-// From vitest rather than vite, so the `test` section below type-checks. It
-// re-exports vite's own defineConfig, so the build is unaffected.
+// `defineConfig` from vitest rather than vite, so the `test` section below
+// type-checks — it re-exports vite's own, so the build is unaffected.
+// `loadEnv` is not re-exported, so it comes straight from vite.
 import { defineConfig } from "vitest/config";
+import { loadEnv } from "vite";
+// Explicit `.ts` extensions on this path and inside the plugin: Vite's config
+// loader resolves them without the bundler step, and warns about extensionless
+// imports it will stop guessing at in a future major.
+import { aiDesignPlugin } from "./src/ai/aiEndpoint.node.ts";
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  /*
+   * Loaded with an empty prefix so ANTHROPIC_API_KEY is visible to the config,
+   * which runs in Node. The third argument is what matters: Vite only exposes
+   * variables to *client* code when they start with `VITE_`, so an unprefixed
+   * name cannot be inlined into the bundle even by accident. Reading it here
+   * does not change that — `loadEnv`'s result stays in the Node process.
+   */
+  plugins: [aiDesignPlugin(loadEnv(mode, process.cwd(), ""))],
   test: {
     /*
      * Thirty seconds, not Vitest's five.
@@ -33,4 +47,4 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ["replicad-opencascadejs"],
   },
-});
+}));

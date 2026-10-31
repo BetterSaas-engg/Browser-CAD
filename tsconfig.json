@@ -26,7 +26,10 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
-  /* The tests, and the one module that exists only for them. Both are checked
-     by tsconfig.test.json instead, which is the only place Node types live. */
-  "exclude": ["src/**/*.test.ts", "src/shapes/bundledFonts.node.ts"]
+  /* Everything that runs in Node rather than in a tab: the tests, and anything
+     named *.node.ts — the test-only font loader and the dev-server AI endpoint.
+     All of it is checked by tsconfig.test.json instead, which is the only place
+     Node types live (D40). Excluding the endpoint here is also a second line of
+     defence: a client file importing it would fail to type-check. */
+  "exclude": ["src/**/*.test.ts", "src/**/*.node.ts"]
 }

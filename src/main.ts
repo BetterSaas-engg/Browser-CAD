@@ -10,6 +10,7 @@ import { defaultDesign } from "./design";
 import { autosave, parseDesign, restoreAutosave, serialiseDesign } from "./designFile";
 import { createViewport } from "./viewport/viewport";
 import { createDesignControls } from "./ui/designControls";
+import { generateDesign } from "./ai/generateDesign";
 
 function requireElement(selector: string): HTMLElement {
   const element = document.querySelector<HTMLElement>(selector);
@@ -29,6 +30,13 @@ const saveButton = requireElement("#design-save") as HTMLButtonElement;
 const fileInput = requireElement("#design-file") as HTMLInputElement;
 /** Export feedback, kept apart from the status line so the volume stays visible. */
 const noteEl = requireElement("#note");
+const aiDescription = requireElement("#ai-description") as HTMLTextAreaElement;
+const aiGenerateButton = requireElement("#ai-generate") as HTMLButtonElement;
+/** Progress, assumptions and refusals for the AI bar, kept out of #error. */
+const aiMessage = requireElement("#ai-message");
+/** Collapsed raw replies, for working out why a generation failed. */
+const aiDetails = requireElement("#ai-details") as HTMLDetailsElement;
+const aiRaw = requireElement("#ai-raw");
 
 /** Surface failures on the page as well as in the console — never swallow. */
 function showError(context: string, error: unknown): void {
@@ -194,6 +202,103 @@ fileInput.addEventListener("change", async () => {
   clearError();
   noteEl.textContent = `Opened ${file.name}`;
   controls.replace(result.design);
+});
+
+/**
+ * Describe a part, have Claude write the design, load it like an opened file.
+ *
+ * The result goes through the same confirmation New does, because it replaces
+ * the current design just as completely — and through the same validator a
+ * file does, before it ever gets here (D58).
+ */
+/**
+ * Show what the model actually replied, collapsed.
+ *
+ * Only the reply text, which is all the endpoint ever returns — no headers, no
+ * key. Written with `textContent`, so a reply full of angle brackets is text
+ * rather than markup.
+ */
+function showAttempts(transcript: { attempt: number; raw: string; problem?: string }[]): void {
+  if (transcript.length === 0) {
+    aiDetails.hidden = true;
+    return;
+  }
+  aiRaw.textContent = transcript
+    .map(({ attempt, raw, problem }) =>
+      [
+        `── Attempt ${attempt} ${problem ? "— rejected" : "— accepted"} ──`,
+        problem ?? "",
+        raw === "" ? "(no reply)" : raw,
+      ]
+        .filter((line) => line !== "")
+        .join("\n"),
+    )
+    .join("\n\n");
+  aiDetails.hidden = false;
+}
+
+aiGenerateButton.addEventListener("click", async () => {
+  if (!controls) return;
+
+  const description = aiDescription.value;
+  aiGenerateButton.disabled = true;
+  // Last run's replies are about last run's question.
+  aiDetails.hidden = true;
+  aiDetails.open = false;
+  aiRaw.textContent = "";
+  // Said before the first request, not after: a generation takes seconds, and
+  // a button that just goes quiet looks broken.
+  const say = (text: string, kind: "working" | "assumptions" | "error"): void => {
+    aiMessage.textContent = text;
+    aiMessage.dataset.kind = kind;
+  };
+  say("Asking Claude…", "working");
+
+  try {
+    const outcome = await generateDesign({
+      description,
+      catalog: shapeCatalog,
+      isDev: import.meta.env.DEV,
+      onAttempt: (attempt) =>
+        say(
+          attempt === 1
+            ? "Asking Claude…"
+            : "The first answer did not validate. Sending the error back for one retry…",
+          "working",
+        ),
+    });
+
+    if (!outcome.ok) {
+      say(outcome.problem, "error");
+      // Opened on a failure, because that is the only time anyone wants it.
+      showAttempts(outcome.transcript);
+      aiDetails.open = outcome.transcript.length > 0;
+      console.warn(`[browser-cad] generate failed: ${outcome.problem}`);
+      return;
+    }
+
+    // Kept on success too, collapsed: useful when the design is valid but not
+    // what was asked for.
+    showAttempts(outcome.transcript);
+
+    // Same question New asks, for the same reason: this throws away work.
+    if (!window.confirm("Replace the current design with Claude's? The current one will be lost.")) {
+      say("Kept your current design. Claude's was discarded.", "working");
+      return;
+    }
+
+    clearError();
+    noteEl.textContent = `Loaded Claude's design${outcome.attempts > 1 ? " (on the retry)" : ""}`;
+    controls.replace(outcome.design);
+    say(
+      outcome.assumptions === ""
+        ? "Claude noted no assumptions."
+        : `Claude's assumptions: ${outcome.assumptions}`,
+      "assumptions",
+    );
+  } finally {
+    aiGenerateButton.disabled = false;
+  }
 });
 
 newButton.addEventListener("click", () => {
